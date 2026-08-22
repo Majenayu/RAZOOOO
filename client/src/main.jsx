@@ -17,6 +17,23 @@ async function api(path, opts = {}) {
 }
 const money = v => `₹${Number(v || 0).toLocaleString("en-IN")}`;
 
+// EventPay Sentinel icon language: original SVG marks for trust, payment, risk and entry.
+function SentinelIcon({ type = "sentinel", size = 24 }) {
+  const paths = {
+    sentinel: <><path d="M12 2.5 19 5v5.2c0 4.5-2.8 8.2-7 10.3-4.2-2.1-7-5.8-7-10.3V5l7-2.5Z" /><path d="m9 12 2 2 4-4" /></>,
+    intake: <><rect x="5" y="3.5" width="14" height="17" rx="2" /><path d="M9 3.5v-1h6v1M8 9h8M8 13h5M8 17h3" /></>,
+    payment: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 9h18M7 14h3" /><path d="M16 12v4M14 14h4" /></>,
+    risk: <><path d="m12 3 9 16H3L12 3Z" /><path d="M12 9v4M12 16h.01" /></>,
+    command: <><path d="M4 19V5M4 19h16" /><path d="m7 15 3-4 3 2 5-7" /></>,
+    entry: <><path d="M5 4h14v16H5z" /><path d="M8 8h8M8 12h8M8 16h4" /><path d="m16 14 2 2-2 2" /></>,
+    ai: <><rect x="5" y="6" width="14" height="13" rx="3" /><path d="M9 11h.01M15 11h.01M9 15c1.5 1 4.5 1 6 0M12 6V3M9 3h6" /></>,
+    messages: <><path d="M4 5h16v11H8l-4 4V5Z" /><path d="M8 9h8M8 12h5" /></>,
+    reconciliation: <><path d="M12 3v18M16 7.5c0-1.5-1.7-2.5-4-2.5s-4 1-4 2.5 1.7 2.5 4 2.5 4 1 4 2.5-1.7 2.5-4 2.5-4-1-4-2.5" /></>,
+    audit: <><path d="M6 3h9l3 3v15H6z" /><path d="M15 3v4h3M9 11h6M9 15h6M9 19h3" /></>
+  };
+  return <svg className={`sentinel-icon icon-${type}`} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[type] || paths.sentinel}</svg>;
+}
+
 // ============ CONTEXT ============
 const AuthCtx = createContext(null);
 const useAuth = () => useContext(AuthCtx);
@@ -36,7 +53,7 @@ function App() {
   const register = async (name, email, phone, password, role) => { const d = await api("/api/auth/register", { method: "POST", body: JSON.stringify({ name, email, phone, password, role }) }); setToken(d.token); setUser(d.user); setPage("events"); };
   const logout = () => { clearToken(); setUser(null); setPage("landing"); };
 
-  if (loading) return <div className="load-screen"><div className="loader-icon">EP</div><p>EventPay Sentinel</p></div>;
+  if (loading) return <div className="load-screen"><div className="loader-icon">⚡</div><p>EventPay Sentinel</p></div>;
 
   return <AuthCtx.Provider value={{ user, logout }}>
     {page === "landing" && <Landing onLogin={() => setPage("login")} onRegister={() => setPage("register")} />}
@@ -49,15 +66,15 @@ function App() {
 // ============ LANDING ============
 function Landing({ onLogin, onRegister }) {
   return <div className="landing">
-    <header className="l-header"><div className="l-brand"><span className="brand-mark">EP</span> EventPay Sentinel</div><div className="l-nav"><button className="btn-ghost" onClick={onLogin}>Login</button><button className="btn-primary" onClick={onRegister}>Get Started</button></div></header>
+    <header className="l-header"><div className="l-brand"><span className="brand-mark"><SentinelIcon size={17} /></span> EventPay Sentinel</div><div className="l-nav"><button className="btn-ghost" onClick={onLogin}>Login</button><button className="btn-primary" onClick={onRegister}>Get Started</button></div></header>
     <section className="hero"><h1>Real-time payment truth for mass events</h1><p>Connect registrations, Razorpay payments, fraud detection, and participant entry in one trusted command center. Never trust a screenshot again.</p><button className="btn-primary btn-lg" onClick={onRegister}>Create Your First Event →</button></section>
     <section className="features"><h2>How it works</h2><div className="f-grid">
-       <div className="f-card"><span className="feature-icon">IN</span><h3>Registration Intake</h3><p>Google Forms → auto-creates registrations with unique IDs and payment links</p></div>
-       <div className="f-card"><span className="feature-icon">₹</span><h3>Razorpay Verification</h3><p>Webhooks verify payments cryptographically. No screenshots needed.</p></div>
-       <div className="f-card"><span className="feature-icon">RS</span><h3>Risk Engine</h3><p>Detects duplicate UTRs, amount mismatches, reused payments instantly</p></div>
-       <div className="f-card"><span className="feature-icon">CC</span><h3>Command Center</h3><p>Live dashboard: verified, pending, suspicious, held — all in real-time</p></div>
-       <div className="f-card"><span className="feature-icon">QR</span><h3>QR Entry Pass</h3><p>Verified participants get QR codes. Volunteers scan at the gate.</p></div>
-       <div className="f-card"><span className="feature-icon">AI</span><h3>AI Investigation</h3><p>Ask "Why is this payment pending?" and get evidence-backed answers</p></div>
+       <div className="f-card"><span className="feature-icon"><SentinelIcon type="intake" /></span><h3>Registration Intake</h3><p>Google Forms → auto-creates registrations with unique IDs and payment links</p></div>
+       <div className="f-card"><span className="feature-icon"><SentinelIcon type="payment" /></span><h3>Razorpay Verification</h3><p>Webhooks verify payments cryptographically. No screenshots needed.</p></div>
+       <div className="f-card"><span className="feature-icon"><SentinelIcon type="risk" /></span><h3>Risk Engine</h3><p>Detects duplicate UTRs, amount mismatches, reused payments instantly</p></div>
+       <div className="f-card"><span className="feature-icon"><SentinelIcon type="command" /></span><h3>Command Center</h3><p>Live dashboard: verified, pending, suspicious, held — all in real-time</p></div>
+       <div className="f-card"><span className="feature-icon"><SentinelIcon type="entry" /></span><h3>QR Entry Pass</h3><p>Verified participants get QR codes. Volunteers scan at the gate.</p></div>
+       <div className="f-card"><span className="feature-icon"><SentinelIcon type="ai" /></span><h3>AI Investigation</h3><p>Ask "Why is this payment pending?" and get evidence-backed answers</p></div>
     </div></section>
     <footer className="l-footer"><p>Built for India's high-volume events · Razorpay-powered · Real-time verification</p></footer>
   </div>;
@@ -91,7 +108,7 @@ function EventsApp() {
   if (selectedEvent) return <EventDashboard event={selectedEvent} view={view} setView={setView} onBack={() => { setSelectedEvent(null); setView("dashboard"); }} notify={notify} toast={toast} />;
 
   return <div className="app-shell">
-    <header className="app-header"><div className="app-brand"><span className="brand-mark">EP</span> EventPay Sentinel</div><div className="app-user"><span>{user?.name}</span><small>{user?.role}</small><button className="btn-ghost btn-sm" onClick={logout}>Logout</button></div></header>
+    <header className="app-header"><div className="app-brand"><span className="brand-mark"><SentinelIcon size={17} /></span> EventPay Sentinel</div><div className="app-user"><span>{user?.name}</span><small>{user?.role}</small><button className="btn-ghost btn-sm" onClick={logout}>Logout</button></div></header>
     <main className="events-page">
       <div className="page-head"><h1>Your Events</h1><CreateEventBtn onCreated={ev => { setEvents(p => [ev, ...p]); notify("Event created!"); }} /></div>
       {events.length ? <div className="events-grid">{events.map(ev => <div key={ev._id} className="event-card" onClick={() => { setSelectedEvent(ev); setView("dashboard"); }}><h3>{ev.name}</h3><p>{ev.venue} · {new Date(ev.eventDate).toLocaleDateString("en-IN")}</p><span className={`badge badge-${ev.status}`}>{ev.status}</span></div>)}</div> : <p className="empty">No events yet. Create your first event to get started.</p>}
@@ -150,21 +167,21 @@ function EventDashboard({ event, view, setView, onBack, notify, toast }) {
   useEffect(() => { loadData(); }, [loadData]);
 
   const navItems = [
-    ["dashboard", "CC", "Command Center"],
-    ["registrations", "RG", "Registrations"],
-    ["risk", "RQ", "Risk Queue"],
-    ["scanner", "IN", "Entry Scanner"],
-    ["ai", "AI", "AI Investigate"],
-    ["messages", "MS", "Messages"],
-    ["reconciliation", "₹", "Reconciliation"],
-    ["audit", "AL", "Audit Log"]
+    ["dashboard", "command", "Command Center"],
+    ["registrations", "intake", "Registrations"],
+    ["risk", "risk", "Risk Queue"],
+    ["scanner", "entry", "Entry Scanner"],
+    ["ai", "ai", "AI Investigate"],
+    ["messages", "messages", "Messages"],
+    ["reconciliation", "reconciliation", "Reconciliation"],
+    ["audit", "audit", "Audit Log"]
   ];
 
   return <div className={`app-shell dashboard-shell ${mobileOpen ? "menu-open" : ""}`}>
     <div className="mobile-scrim" onClick={() => setMobileOpen(false)} />
     <aside className="sidebar">
       <div className="sb-header"><button className="back-link" onClick={onBack}>← Events</button><h3>{event.name}</h3><small>{event.venue} · {new Date(event.eventDate).toLocaleDateString("en-IN")}</small></div>
-       <nav>{navItems.map(([key, icon, label]) => <button key={key} className={view === key ? "active" : ""} onClick={() => { setView(key); setMobileOpen(false); }}><span>{icon}</span>{label}</button>)}</nav>
+       <nav>{navItems.map(([key, icon, label]) => <button key={key} className={view === key ? "active" : ""} onClick={() => { setView(key); setMobileOpen(false); }}><span><SentinelIcon type={icon} size={17} /></span>{label}</button>)}</nav>
       <div className="sb-footer"><span>{user?.name}</span><small>{user?.role}</small></div>
     </aside>
     <main className="main-view">
