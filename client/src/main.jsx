@@ -130,6 +130,7 @@ function CreateEventBtn({ onCreated }) {
 // ============ EVENT DASHBOARD ============
 function EventDashboard({ event, view, setView, onBack, notify, toast }) {
   const { user } = useAuth();
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [metrics, setMetrics] = useState({});
   const [regs, setRegs] = useState([]);
   const [risks, setRisks] = useState([]);
@@ -159,13 +160,15 @@ function EventDashboard({ event, view, setView, onBack, notify, toast }) {
     ["audit", "📜", "Audit Log"]
   ];
 
-  return <div className="app-shell">
+  return <div className={`app-shell dashboard-shell ${mobileOpen ? "menu-open" : ""}`}>
+    <div className="mobile-scrim" onClick={() => setMobileOpen(false)} />
     <aside className="sidebar">
       <div className="sb-header"><button className="back-link" onClick={onBack}>← Events</button><h3>{event.name}</h3><small>{event.venue} · {new Date(event.eventDate).toLocaleDateString("en-IN")}</small></div>
-      <nav>{navItems.map(([key, icon, label]) => <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}><span>{icon}</span>{label}</button>)}</nav>
+       <nav>{navItems.map(([key, icon, label]) => <button key={key} className={view === key ? "active" : ""} onClick={() => { setView(key); setMobileOpen(false); }}><span>{icon}</span>{label}</button>)}</nav>
       <div className="sb-footer"><span>{user?.name}</span><small>{user?.role}</small></div>
     </aside>
     <main className="main-view">
+       <div className="mobile-topbar"><button className="menu-toggle" onClick={() => setMobileOpen(true)} aria-label="Open navigation">☰</button><span>{event.name}</span><span className="live-dot">● Live</span></div>
       {view === "dashboard" && <CommandCenter metrics={metrics} regs={regs} risks={risks} event={event} notify={notify} reload={loadData} />}
       {view === "registrations" && <Registrations event={event} regs={regs} notify={notify} reload={loadData} />}
       {view === "risk" && <RiskQueueView event={event} risks={risks} regs={regs} notify={notify} reload={loadData} />}
