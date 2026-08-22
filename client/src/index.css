@@ -252,6 +252,7 @@ button,input,select,textarea{font-family:inherit}
 .sb-footer small{color:#858ca3}
 .main-view{background:var(--bg)}
 .mobile-topbar{display:none}
+.mobile-bottom-nav{display:none}
 .page{max-width:1240px;padding:34px 40px 72px}
 .page-head{margin-bottom:28px}
 .page-head h1{font-size:27px;letter-spacing:-.8px}
@@ -309,7 +310,14 @@ tr.row-risk{background:#fff8f3}
   .mobile-topbar{height:64px;display:flex;align-items:center;gap:12px;padding:0 16px;background:#fff;border-bottom:1px solid var(--border);font-size:13px;font-weight:700;position:sticky;top:0;z-index:20}
   .menu-toggle{background:var(--accent-light);color:var(--accent);width:34px;height:34px;border-radius:9px;font-size:18px}
   .live-dot{margin-left:auto;color:var(--green);font-size:10px}
-  .page{padding:22px 16px 48px}
+  .mobile-bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;height:68px;z-index:35;align-items:stretch;justify-content:space-around;padding:7px 4px max(7px, env(safe-area-inset-bottom));background:rgba(255,255,255,.96);border-top:1px solid var(--border);box-shadow:0 -8px 25px rgba(26,32,58,.08);backdrop-filter:blur(14px)}
+  .mobile-bottom-nav button{display:flex;flex:1;max-width:105px;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:none;color:#8991a5;font-size:10px;font-weight:500;border-radius:10px}
+  .mobile-bottom-nav button.active{color:var(--accent);font-weight:700}
+  .mobile-bottom-nav button.active .sentinel-icon{stroke-width:2.4}
+  .mobile-bottom-nav .sentinel-icon{height:22px}
+  .more-dots{height:22px;display:flex;align-items:center;gap:3px}
+  .more-dots i{display:block;width:4px;height:4px;border-radius:50%;background:currentColor}
+  .page{padding:22px 16px 92px}
   .page-head h1{font-size:23px}
   .page-head .btn-primary,.page-head .btn-ghost{padding:9px 12px}
   .finance-row,.dash-grid{gap:12px}

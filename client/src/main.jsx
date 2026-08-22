@@ -195,6 +195,16 @@ function EventDashboard({ event, view, setView, onBack, notify, toast }) {
       {view === "reconciliation" && <Reconciliation event={event} notify={notify} />}
       {view === "audit" && <AuditLogView event={event} />}
     </main>
+    <nav className="mobile-bottom-nav" aria-label="Mobile dashboard navigation">
+      {[["dashboard", "command", "Home"], ["registrations", "intake", "Registrations"], ["risk", "risk", "Risk"], ["scanner", "entry", "Entry"]].map(([key, icon, label]) =>
+        <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}>
+          <SentinelIcon type={icon} size={21} /><span>{label}</span>
+        </button>
+      )}
+      <button className={mobileOpen ? "active" : ""} onClick={() => setMobileOpen(true)}>
+        <span className="more-dots"><i /><i /><i /></span><span>More</span>
+      </button>
+    </nav>
     {toast && <div className="toast">{toast}</div>}
   </div>;
 }
