@@ -36,7 +36,7 @@ function App() {
   const register = async (name, email, phone, password, role) => { const d = await api("/api/auth/register", { method: "POST", body: JSON.stringify({ name, email, phone, password, role }) }); setToken(d.token); setUser(d.user); setPage("events"); };
   const logout = () => { clearToken(); setUser(null); setPage("landing"); };
 
-  if (loading) return <div className="load-screen"><div className="loader-icon">⚡</div><p>EventPay Sentinel</p></div>;
+  if (loading) return <div className="load-screen"><div className="loader-icon">EP</div><p>EventPay Sentinel</p></div>;
 
   return <AuthCtx.Provider value={{ user, logout }}>
     {page === "landing" && <Landing onLogin={() => setPage("login")} onRegister={() => setPage("register")} />}
@@ -49,15 +49,15 @@ function App() {
 // ============ LANDING ============
 function Landing({ onLogin, onRegister }) {
   return <div className="landing">
-    <header className="l-header"><div className="l-brand">⚡ EventPay Sentinel</div><div className="l-nav"><button className="btn-ghost" onClick={onLogin}>Login</button><button className="btn-primary" onClick={onRegister}>Get Started</button></div></header>
+    <header className="l-header"><div className="l-brand"><span className="brand-mark">EP</span> EventPay Sentinel</div><div className="l-nav"><button className="btn-ghost" onClick={onLogin}>Login</button><button className="btn-primary" onClick={onRegister}>Get Started</button></div></header>
     <section className="hero"><h1>Real-time payment truth for mass events</h1><p>Connect registrations, Razorpay payments, fraud detection, and participant entry in one trusted command center. Never trust a screenshot again.</p><button className="btn-primary btn-lg" onClick={onRegister}>Create Your First Event →</button></section>
     <section className="features"><h2>How it works</h2><div className="f-grid">
-      <div className="f-card"><span>📋</span><h3>Registration Intake</h3><p>Google Forms → auto-creates registrations with unique IDs and payment links</p></div>
-      <div className="f-card"><span>💳</span><h3>Razorpay Verification</h3><p>Webhooks verify payments cryptographically. No screenshots needed.</p></div>
-      <div className="f-card"><span>🔍</span><h3>Risk Engine</h3><p>Detects duplicate UTRs, amount mismatches, reused payments instantly</p></div>
-      <div className="f-card"><span>📊</span><h3>Command Center</h3><p>Live dashboard: verified, pending, suspicious, held — all in real-time</p></div>
-      <div className="f-card"><span>🎫</span><h3>QR Entry Pass</h3><p>Verified participants get QR codes. Volunteers scan at the gate.</p></div>
-      <div className="f-card"><span>🤖</span><h3>AI Investigation</h3><p>Ask "Why is this payment pending?" and get evidence-backed answers</p></div>
+       <div className="f-card"><span className="feature-icon">IN</span><h3>Registration Intake</h3><p>Google Forms → auto-creates registrations with unique IDs and payment links</p></div>
+       <div className="f-card"><span className="feature-icon">₹</span><h3>Razorpay Verification</h3><p>Webhooks verify payments cryptographically. No screenshots needed.</p></div>
+       <div className="f-card"><span className="feature-icon">RS</span><h3>Risk Engine</h3><p>Detects duplicate UTRs, amount mismatches, reused payments instantly</p></div>
+       <div className="f-card"><span className="feature-icon">CC</span><h3>Command Center</h3><p>Live dashboard: verified, pending, suspicious, held — all in real-time</p></div>
+       <div className="f-card"><span className="feature-icon">QR</span><h3>QR Entry Pass</h3><p>Verified participants get QR codes. Volunteers scan at the gate.</p></div>
+       <div className="f-card"><span className="feature-icon">AI</span><h3>AI Investigation</h3><p>Ask "Why is this payment pending?" and get evidence-backed answers</p></div>
     </div></section>
     <footer className="l-footer"><p>Built for India's high-volume events · Razorpay-powered · Real-time verification</p></footer>
   </div>;
@@ -91,7 +91,7 @@ function EventsApp() {
   if (selectedEvent) return <EventDashboard event={selectedEvent} view={view} setView={setView} onBack={() => { setSelectedEvent(null); setView("dashboard"); }} notify={notify} toast={toast} />;
 
   return <div className="app-shell">
-    <header className="app-header"><div className="app-brand">⚡ EventPay Sentinel</div><div className="app-user"><span>{user?.name}</span><small>{user?.role}</small><button className="btn-ghost btn-sm" onClick={logout}>Logout</button></div></header>
+    <header className="app-header"><div className="app-brand"><span className="brand-mark">EP</span> EventPay Sentinel</div><div className="app-user"><span>{user?.name}</span><small>{user?.role}</small><button className="btn-ghost btn-sm" onClick={logout}>Logout</button></div></header>
     <main className="events-page">
       <div className="page-head"><h1>Your Events</h1><CreateEventBtn onCreated={ev => { setEvents(p => [ev, ...p]); notify("Event created!"); }} /></div>
       {events.length ? <div className="events-grid">{events.map(ev => <div key={ev._id} className="event-card" onClick={() => { setSelectedEvent(ev); setView("dashboard"); }}><h3>{ev.name}</h3><p>{ev.venue} · {new Date(ev.eventDate).toLocaleDateString("en-IN")}</p><span className={`badge badge-${ev.status}`}>{ev.status}</span></div>)}</div> : <p className="empty">No events yet. Create your first event to get started.</p>}
@@ -150,14 +150,14 @@ function EventDashboard({ event, view, setView, onBack, notify, toast }) {
   useEffect(() => { loadData(); }, [loadData]);
 
   const navItems = [
-    ["dashboard", "📊", "Command Center"],
-    ["registrations", "📋", "Registrations"],
-    ["risk", "🔍", "Risk Queue"],
-    ["scanner", "🎫", "Entry Scanner"],
-    ["ai", "🤖", "AI Investigate"],
-    ["messages", "💬", "Messages"],
-    ["reconciliation", "💰", "Reconciliation"],
-    ["audit", "📜", "Audit Log"]
+    ["dashboard", "CC", "Command Center"],
+    ["registrations", "RG", "Registrations"],
+    ["risk", "RQ", "Risk Queue"],
+    ["scanner", "IN", "Entry Scanner"],
+    ["ai", "AI", "AI Investigate"],
+    ["messages", "MS", "Messages"],
+    ["reconciliation", "₹", "Reconciliation"],
+    ["audit", "AL", "Audit Log"]
   ];
 
   return <div className={`app-shell dashboard-shell ${mobileOpen ? "menu-open" : ""}`}>
@@ -268,7 +268,7 @@ function RiskQueueView({ event, risks, regs, notify, reload }) {
       const reg = regs.find(x => x.registrationId === r.registrationId);
       return <div key={r._id} className={`risk-card risk-${r.severity}`}>
         <div className="rc-header"><span className={`badge badge-${r.severity}`}>{r.severity.toUpperCase()}</span><strong>{r.registrationId}</strong><small>{r.type.replace(/_/g, " ")}</small></div>
-        <div className="rc-body">{reg && <p>{reg.name} · {reg.phone} · Expected: {money(reg.expectedAmount)} · Received: {money(reg.amountReceived)}</p>}{r.details?.reasons?.map((reason, i) => <p key={i} className="reason">⚠️ {reason}</p>)}</div>
+        <div className="rc-body">{reg && <p>{reg.name} · {reg.phone} · Expected: {money(reg.expectedAmount)} · Received: {money(reg.amountReceived)}</p>}{r.details?.reasons?.map((reason, i) => <p key={i} className="reason"><span className="reason-mark">!</span> {reason}</p>)}</div>
         <div className="rc-actions"><button className="btn-primary btn-sm" onClick={() => resolve(r._id, "approved")}>Approve Entry</button><button className="btn-ghost btn-sm" onClick={() => resolve(r._id, "dismissed")}>Dismiss</button></div>
       </div>;
     })}</div> : <p className="empty">No risk alerts. All clear!</p>}
@@ -299,12 +299,12 @@ function EntryScanner({ event, notify, reload }) {
       <form onSubmit={scan}><input className="scan-input" value={regId} onChange={e => setRegId(e.target.value)} placeholder="Enter REG ID or scan QR..." autoFocus /><button className="btn-primary" disabled={busy}>{busy ? "..." : "Check"}</button></form>
     </div>
     {result && !result.error && <div className={`scan-result ${result.entryStatus === "entry_approved" || result.entryStatus === "checked_in" ? "sr-green" : result.entryStatus === "entry_held" ? "sr-red" : "sr-yellow"}`}>
-      <h2>{result.entryStatus === "entry_approved" ? "✅ ENTRY APPROVED" : result.entryStatus === "checked_in" ? "✅ ALREADY CHECKED IN" : result.entryStatus === "entry_held" ? "🚫 ENTRY HELD" : "⏳ PAYMENT PENDING"}</h2>
-      <div className="sr-details"><p><strong>{result.name}</strong></p><p>{result.ticketType} · {money(result.expectedAmount)}</p><p>Payment: {result.paymentStatus.replace(/_/g, " ")}</p>{result.riskReasons?.length > 0 && <p className="reason">⚠️ {result.riskReasons.join(", ")}</p>}</div>
+       <h2>{result.entryStatus === "entry_approved" ? "ENTRY APPROVED" : result.entryStatus === "checked_in" ? "ALREADY CHECKED IN" : result.entryStatus === "entry_held" ? "ENTRY HELD" : "PAYMENT PENDING"}</h2>
+       <div className="sr-details"><p><strong>{result.name}</strong></p><p>{result.ticketType} · {money(result.expectedAmount)}</p><p>Payment: {result.paymentStatus.replace(/_/g, " ")}</p>{result.riskReasons?.length > 0 && <p className="reason"><span className="reason-mark">!</span> {result.riskReasons.join(", ")}</p>}</div>
       {result.entryStatus === "entry_approved" && <button className="btn-primary btn-lg" onClick={checkIn}>Admit →</button>}
       {result.entryStatus === "entry_held" && <p className="action-note">Send to payment help desk</p>}
     </div>}
-    {result?.error && <div className="scan-result sr-red"><h2>❌ NOT FOUND</h2><p>{result.error}</p></div>}
+    {result?.error && <div className="scan-result sr-red"><h2>NOT FOUND</h2><p>{result.error}</p></div>}
   </div>;
 }
 
