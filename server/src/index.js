@@ -17,6 +17,22 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || "eventpay-sentinel-secret";
 
+// ============ HELPERS ============
+function razorpayErrorMessage(e) {
+  return e?.error?.description || e?.message || JSON.stringify(e);
+}
+
+// ============ RATE LIMITING ============
+const rateLimits = {};
+function rateLimit(key, maxRequests = 30, windowMs = 60000) {
+  const now = Date.now();
+  if (!rateLimits[key]) rateLimits[key] = [];
+  rateLimits[key] = rateLimits[key].filter(t => now - t < windowMs);
+  if (rateLimits[key].length >= maxRequests) return false;
+  rateLimits[key].push(now);
+  return true;
+}
+
 // ============ RAZORPAY WEBHOOK (raw body needed) ============
 app.post("/api/webhooks/razorpay", express.raw({ type: "application/json" }), async (req, res) => {
   try {
@@ -34,13 +50,16 @@ app.post("/api/webhooks/razorpay", express.raw({ type: "application/json" }), as
       if (evt) webhookSecret = evt.razorpayWebhookSecret;
     }
 
-    // Verify signature if webhook secret is configured
+    // Verify signature — MANDATORY if webhook secret is configured
     if (webhookSecret) {
       const signature = req.headers["x-razorpay-signature"];
       const expected = crypto.createHmac("sha256", webhookSecret).update(req.body).digest("hex");
       if (!signature || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
-        return res.status(401).json({ error: "Invalid signature" });
+        return res.status(401).json({ error: "Invalid signature — webhook rejected" });
       }
+    } else {
+      // No webhook secret: accept but mark as unverified (manual review required)
+      console.warn("Webhook received without verification — no secret configured for event:", eventId);
     }
 
     // Store payment event
@@ -232,9 +251,10 @@ app.post("/api/events/:eventId/registrations", auth, async (req, res) => {
     if (!ticket) return res.status(400).json({ error: "Invalid ticket type" });
     const expectedAmount = ticket.price * (numberOfTickets || 1);
 
-    // Generate unique registration ID
+    // Generate unique registration ID (collision-safe)
     const count = await Registration.countDocuments({ eventId: event._id });
-    const registrationId = `REG-${String(count + 1001).padStart(4, "0")}`;
+    const suffix = crypto.randomBytes(3).toString("hex").toUpperCase();
+    const registrationId = `REG-${String(count + 1001).padStart(4, "0")}-${suffix}`;
 
     // Check duplicate phone+event
     const dup = await Registration.findOne({ eventId: event._id, phone });
@@ -280,6 +300,11 @@ app.post("/api/events/:eventId/registrations", auth, async (req, res) => {
 // Google Form intake (token-protected, no JWT needed)
 app.post("/api/intake/:intakeToken", async (req, res) => {
   try {
+    // Rate limiting: max 60 requests per minute per intake token
+    if (!rateLimit(`intake_${req.params.intakeToken}`, 60)) {
+      return res.status(429).json({ error: "Too many requests. Please slow down." });
+    }
+
     const event = await Event.findOne({ intakeToken: req.params.intakeToken });
     if (!event) return res.status(404).json({ error: "Invalid intake token" });
     const { name, phone, email, college, category, ticketType } = req.body;
@@ -295,7 +320,8 @@ app.post("/api/intake/:intakeToken", async (req, res) => {
 
     const expectedAmount = ticket.price;
     const count = await Registration.countDocuments({ eventId: event._id });
-    const registrationId = `REG-${String(count + 1001).padStart(4, "0")}`;
+    const suffix = crypto.randomBytes(3).toString("hex").toUpperCase();
+    const registrationId = `REG-${String(count + 1001).padStart(4, "0")}-${suffix}`;
     const dup = await Registration.findOne({ eventId: event._id, phone });
     if (dup) return res.status(400).json({ error: "Already registered", registrationId: dup.registrationId, paymentLinkUrl: dup.paymentLinkUrl });
     const entryToken = crypto.randomBytes(20).toString("hex");
@@ -368,6 +394,50 @@ app.get("/api/events/:eventId/risk-queue", auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Resolve a risk queue item
+app.post("/api/events/:eventId/risk-queue/:riskId/resolve", auth, async (req, res) => {
+  try {
+    const { resolution, action } = req.body;
+    const risk = await RiskQueue.findOne({ _id: req.params.riskId, eventId: req.params.eventId });
+    if (!risk) return res.status(404).json({ error: "Risk case not found" });
+
+    risk.status = "resolved";
+    risk.resolvedBy = req.userId;
+    risk.resolution = resolution || action || "resolved";
+    await risk.save();
+
+    // If action is "approve", approve the registration
+    if (action === "approve") {
+      await Registration.findOneAndUpdate(
+        { eventId: req.params.eventId, registrationId: risk.registrationId },
+        { entryStatus: "entry_approved", paymentStatus: "payment_verified" }
+      );
+    } else if (action === "hold") {
+      await Registration.findOneAndUpdate(
+        { eventId: req.params.eventId, registrationId: risk.registrationId },
+        { entryStatus: "entry_held" }
+      );
+    }
+
+    await AuditLog.create({ eventId: req.params.eventId, actorId: req.userId, actorRole: req.role, action: `risk.${action || "resolved"}`, target: risk.registrationId, reason: resolution || "" });
+    res.json(risk);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Dismiss a risk queue item
+app.post("/api/events/:eventId/risk-queue/:riskId/dismiss", auth, async (req, res) => {
+  try {
+    const risk = await RiskQueue.findOneAndUpdate(
+      { _id: req.params.riskId, eventId: req.params.eventId },
+      { status: "dismissed", resolvedBy: req.userId, resolution: req.body.reason || "dismissed" },
+      { new: true }
+    );
+    if (!risk) return res.status(404).json({ error: "Risk case not found" });
+    await AuditLog.create({ eventId: req.params.eventId, actorId: req.userId, actorRole: req.role, action: "risk.dismissed", target: risk.registrationId, reason: req.body.reason || "" });
+    res.json(risk);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post("/api/events/:eventId/registrations/:regId/hold", auth, async (req, res) => {
   try {
     const reg = await Registration.findOneAndUpdate({ eventId: req.params.eventId, registrationId: req.params.regId }, { entryStatus: "entry_held" }, { new: true });
@@ -378,7 +448,18 @@ app.post("/api/events/:eventId/registrations/:regId/hold", auth, async (req, res
 
 app.post("/api/events/:eventId/registrations/:regId/approve", auth, async (req, res) => {
   try {
-    const reg = await Registration.findOneAndUpdate({ eventId: req.params.eventId, registrationId: req.params.regId }, { entryStatus: "entry_approved", paymentStatus: "payment_verified" }, { new: true });
+    const reg = await Registration.findOne({ eventId: req.params.eventId, registrationId: req.params.regId });
+    if (!reg) return res.status(404).json({ error: "Registration not found" });
+
+    // Backend safety checks before approval
+    if (reg.entryStatus === "checked_in") return res.status(400).json({ error: "Already checked in — cannot change status" });
+    if (reg.paymentStatus === "refunded") return res.status(400).json({ error: "Payment was refunded — cannot approve entry" });
+    if (reg.paymentStatus === "duplicate_claim") return res.status(400).json({ error: "Duplicate claim detected — resolve risk case first" });
+
+    reg.entryStatus = "entry_approved";
+    reg.paymentStatus = "payment_verified";
+    await reg.save();
+
     await AuditLog.create({ eventId: req.params.eventId, actorId: req.userId, actorRole: req.role, action: "entry.approved", target: req.params.regId, reason: req.body.reason || "" });
     res.json(reg);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -405,6 +486,54 @@ app.post("/api/events/:eventId/entry/:regId/check-in", auth, async (req, res) =>
     await reg.save();
     await AuditLog.create({ eventId: req.params.eventId, actorId: req.userId, actorRole: req.role, action: "entry.checked_in", target: reg.registrationId });
     res.json(reg);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============ EVIDENCE & TIMELINE ============
+// Get full evidence for a registration (for investigation)
+app.get("/api/events/:eventId/registrations/:regId/evidence", auth, async (req, res) => {
+  try {
+    const reg = await Registration.findOne({ eventId: req.params.eventId, registrationId: req.params.regId });
+    if (!reg) return res.status(404).json({ error: "Registration not found" });
+    const payments = await PaymentEvent.find({ $or: [{ registrationId: reg.registrationId }, { eventId: req.params.eventId, contact: { $regex: reg.phone.slice(-10) } }] }).sort({ createdAt: -1 });
+    const risks = await RiskQueue.find({ eventId: req.params.eventId, registrationId: reg.registrationId });
+    const audits = await AuditLog.find({ eventId: req.params.eventId, target: reg.registrationId }).populate("actorId", "name").sort({ createdAt: -1 });
+    const duplicateClaims = await Registration.find({ eventId: req.params.eventId, utr: reg.utr, utr: { $ne: "" }, registrationId: { $ne: reg.registrationId } });
+
+    // Build timeline
+    const timeline = [];
+    timeline.push({ time: reg.createdAt, event: "Registration created", detail: `${reg.name} registered for ${reg.ticketType}` });
+    if (reg.paymentLinkUrl) timeline.push({ time: reg.createdAt, event: "Payment link generated", detail: reg.paymentLinkUrl });
+    for (const p of payments) {
+      timeline.push({ time: p.createdAt, event: `Payment ${p.status}`, detail: `₹${p.amount} via ${p.method || "unknown"} | ID: ${p.razorpayPaymentId}` });
+    }
+    for (const r of risks) {
+      timeline.push({ time: r.createdAt, event: `Risk flagged: ${r.type.replace(/_/g, " ")}`, detail: `Severity: ${r.severity}` });
+      if (r.status === "resolved") timeline.push({ time: r.updatedAt, event: "Risk resolved", detail: r.resolution });
+    }
+    for (const a of audits) {
+      timeline.push({ time: a.createdAt, event: a.action, detail: `by ${a.actorId?.name || "System"} ${a.reason ? "— " + a.reason : ""}` });
+    }
+    if (reg.checkedInAt) timeline.push({ time: reg.checkedInAt, event: "Checked in", detail: "Entry confirmed" });
+    timeline.sort((a, b) => new Date(a.time) - new Date(b.time));
+
+    // Risk score breakdown
+    const riskBreakdown = [];
+    if (reg.utr && duplicateClaims.length > 0) riskBreakdown.push({ signal: "Duplicate UTR", score: 40, detail: `UTR used by ${duplicateClaims.length} other registration(s)` });
+    if (reg.paymentStatus === "amount_mismatch") riskBreakdown.push({ signal: "Amount mismatch", score: 25, detail: `Expected ₹${reg.expectedAmount}, received ₹${reg.amountReceived}` });
+    if (payments.some(p => p.status === "refunded")) riskBreakdown.push({ signal: "Refunded payment", score: 20, detail: "Payment was refunded after capture" });
+    if (reg.riskReasons?.length) riskBreakdown.push({ signal: "Additional risk signals", score: 15, detail: reg.riskReasons.join("; ") });
+
+    res.json({
+      registration: reg,
+      payments,
+      risks,
+      audits,
+      duplicateClaims,
+      timeline,
+      riskBreakdown,
+      riskBand: reg.riskScore >= 80 ? "critical" : reg.riskScore >= 50 ? "high" : reg.riskScore >= 20 ? "medium" : "low"
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
