@@ -26,7 +26,6 @@ const eventSchema = new mongoose.Schema({
   venue: { type: String, default: "" },
   eventDate: { type: Date, required: true },
   status: { type: String, enum: ["draft", "live", "closed"], default: "draft" },
-  isDemo: { type: Boolean, default: false, index: true },
   ticketTypes: [ticketTypeSchema],
   capacity: { type: Number, default: 1000 },
   registrationStart: { type: Date, default: Date.now },

@@ -183,10 +183,10 @@ app.get("/api/auth/me", auth, async (req, res) => {
 // ============ EVENT ROUTES ============
 app.post("/api/events", auth, async (req, res) => {
   try {
-    const { name, venue, eventDate, ticketTypes, capacity, registrationEnd, paymentExpiryMinutes, entryRules, razorpayKeyId, razorpayKeySecret, isDemo } = req.body;
+    const { name, venue, eventDate, ticketTypes, capacity, registrationEnd, paymentExpiryMinutes, entryRules, razorpayKeyId, razorpayKeySecret } = req.body;
     if (!name || !eventDate) return res.status(400).json({ error: "Event name and date required" });
     const intakeToken = crypto.randomBytes(16).toString("hex");
-    const event = await Event.create({ organizerId: req.userId, name, venue: venue || "", eventDate, isDemo: Boolean(isDemo), ticketTypes: ticketTypes || [], capacity: capacity || 1000, registrationEnd, paymentExpiryMinutes: paymentExpiryMinutes || 60, entryRules: entryRules || "", intakeToken, razorpayKeyId: razorpayKeyId || "", razorpayKeySecret: razorpayKeySecret || "" });
+    const event = await Event.create({ organizerId: req.userId, name, venue: venue || "", eventDate, ticketTypes: ticketTypes || [], capacity: capacity || 1000, registrationEnd, paymentExpiryMinutes: paymentExpiryMinutes || 60, entryRules: entryRules || "", intakeToken, razorpayKeyId: razorpayKeyId || "", razorpayKeySecret: razorpayKeySecret || "" });
     await AuditLog.create({ eventId: event._id, actorId: req.userId, actorRole: req.role, action: "event.created", target: event._id });
     res.status(201).json(event);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1283,8 +1283,6 @@ app.post("/api/events/:eventId/demo-seed", auth, async (req, res) => {
     const event = await Event.findById(req.params.eventId);
     if (!event) return res.status(404).json({ error: "Event not found" });
     if (String(event.organizerId) !== String(req.userId)) return res.status(403).json({ error: "Only the event owner can seed demo data" });
-    if (!event.isDemo) return res.status(400).json({ error: "Demo data can only be added to a separate demo event." });
-    if (await Registration.exists({ eventId: event._id })) return res.status(409).json({ error: "This demo event already has data. Use Reset demo data before seeding it again." });
 
     const eventId = event._id;
     const ticketType = event.ticketTypes?.[0]?.name || "General";
@@ -1364,19 +1362,19 @@ app.post("/api/events/:eventId/demo-seed", auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Demo reset: deliberately limited to events explicitly marked as demo.
+// Demo reset
 app.post("/api/events/:eventId/demo-reset", auth, async (req, res) => {
   try {
-    const event = await Event.findOne({ _id: req.params.eventId, organizerId: req.userId, isDemo: true });
-    if (!event) return res.status(403).json({ error: "Only a separate demo event can be reset. Your original event was not changed." });
+    const event = await Event.findById(req.params.eventId);
+    if (!event || String(event.organizerId) !== String(req.userId)) return res.status(403).json({ error: "Not authorized" });
     await Promise.all([
-      Registration.deleteMany({ eventId: event._id }),
-      PaymentEvent.deleteMany({ eventId: event._id }),
-      RiskQueue.deleteMany({ eventId: event._id }),
-      MessageLog.deleteMany({ eventId: event._id }),
-      AuditLog.deleteMany({ eventId: event._id })
+      Registration.deleteMany({ eventId: req.params.eventId }),
+      PaymentEvent.deleteMany({ eventId: req.params.eventId }),
+      RiskQueue.deleteMany({ eventId: req.params.eventId }),
+      MessageLog.deleteMany({ eventId: req.params.eventId }),
+      AuditLog.deleteMany({ eventId: req.params.eventId })
     ]);
-    res.json({ success: true, message: "Demo data cleared. Your original event data was not changed." });
+    res.json({ success: true, message: "All demo data cleared" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
