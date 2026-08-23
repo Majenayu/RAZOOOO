@@ -545,11 +545,11 @@ function EventDashboard({ event, view, setView, onBack, notify, toast }) {
     try {
       const [m, r, rk, msgs] = await Promise.all([
         api(`/api/events/${event._id}/metrics`),
-        api(`/api/events/${event._id}/registrations`),
+        api(`/api/events/${event._id}/registrations?pageSize=100`),
         api(`/api/events/${event._id}/risk-queue`),
         api(`/api/events/${event._id}/messages`)
       ]);
-      setMetrics(m); setRegs(r); setRisks(rk); setMessages(msgs);
+      setMetrics(m); setRegs(r.data || r); setRisks(rk); setMessages(msgs);
     } catch (e) { notify(e.message); }
   }, [event._id]);
   useEffect(() => { loadData(); }, [loadData]);

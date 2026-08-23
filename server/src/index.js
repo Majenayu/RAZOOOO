@@ -101,6 +101,27 @@ function auth(req, res, next) {
   } catch { return res.status(401).json({ error: "Invalid token" }); }
 }
 
+// Role-based permission middleware
+function requireRole(...allowedRoles) {
+  return async (req, res, next) => {
+    // Check if user is event owner or collaborator with proper role
+    const eventId = req.params.eventId || req.params.id;
+    if (!eventId) return next(); // No event context, allow
+    try {
+      const event = await Event.findById(eventId);
+      if (!event) return res.status(404).json({ error: "Event not found" });
+      // Owner has all access
+      if (String(event.organizerId) === String(req.userId)) return next();
+      // Check collaborator role
+      const user = await User.findById(req.userId);
+      const collab = event.collaborators?.find(c => c.email === user?.email);
+      if (!collab) return res.status(403).json({ error: "You don't have access to this event" });
+      if (allowedRoles.includes(collab.role) || allowedRoles.includes("viewer")) return next();
+      return res.status(403).json({ error: `This action requires ${allowedRoles.join(" or ")} access` });
+    } catch (e) { return res.status(500).json({ error: e.message }); }
+  };
+}
+
 // ============ AUTH ROUTES ============
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -364,9 +385,19 @@ app.get("/api/events/:eventId/registrations", auth, async (req, res) => {
   try {
     const query = { eventId: req.params.eventId };
     if (req.query.status) query.paymentStatus = req.query.status;
+    if (req.query.entryStatus) query.entryStatus = req.query.entryStatus;
     if (req.query.search) query.$or = [{ name: { $regex: req.query.search, $options: "i" } }, { phone: { $regex: req.query.search } }, { registrationId: { $regex: req.query.search, $options: "i" } }];
-    const regs = await Registration.find(query).sort({ createdAt: -1 }).limit(Number(req.query.limit) || 500);
-    res.json(regs);
+    
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 50));
+    const sortField = req.query.sort || "createdAt";
+    const sortOrder = req.query.order === "asc" ? 1 : -1;
+
+    const [regs, total] = await Promise.all([
+      Registration.find(query).sort({ [sortField]: sortOrder }).skip((page - 1) * pageSize).limit(pageSize),
+      Registration.countDocuments(query)
+    ]);
+    res.json({ data: regs, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -563,12 +594,41 @@ app.get("/api/events/:eventId/metrics", auth, async (req, res) => {
 app.get("/api/events/:eventId/reconciliation", auth, async (req, res) => {
   try {
     const eventId = req.params.eventId;
-    const expectedGross = (await Registration.aggregate([{ $match: { eventId: new mongoose.Types.ObjectId(eventId) } }, { $group: { _id: null, total: { $sum: "$expectedAmount" } } }]))[0]?.total || 0;
-    const captured = (await PaymentEvent.aggregate([{ $match: { eventId: new mongoose.Types.ObjectId(eventId), status: "captured" } }, { $group: { _id: null, total: { $sum: "$amount" } } }]))[0]?.total || 0;
-    const refunded = (await PaymentEvent.aggregate([{ $match: { eventId: new mongoose.Types.ObjectId(eventId), status: "refunded" } }, { $group: { _id: null, total: { $sum: "$amount" } } }]))[0]?.total || 0;
-    const fees = Math.round(captured * 0.02 * 100) / 100; // ~2% Razorpay fees
-    const expectedNet = captured - refunded - fees;
-    res.json({ expectedGross, captured, refunded, fees, expectedNet, difference: expectedGross - captured });
+    const oid = new mongoose.Types.ObjectId(eventId);
+    const [expectedGross, captured, refunded, failed, regsWithoutPayment, paymentsWithoutReg, mismatches, duplicates, verified] = await Promise.all([
+      Registration.aggregate([{ $match: { eventId: oid } }, { $group: { _id: null, total: { $sum: "$expectedAmount" } } }]),
+      PaymentEvent.aggregate([{ $match: { eventId: oid, status: "captured" } }, { $group: { _id: null, total: { $sum: "$amount" } } }]),
+      PaymentEvent.aggregate([{ $match: { eventId: oid, status: "refunded" } }, { $group: { _id: null, total: { $sum: "$amount" } } }]),
+      PaymentEvent.aggregate([{ $match: { eventId: oid, status: "failed" } }, { $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } } }]),
+      Registration.countDocuments({ eventId, paymentStatus: "awaiting_payment" }),
+      PaymentEvent.countDocuments({ eventId, matched: false }),
+      Registration.countDocuments({ eventId, paymentStatus: "amount_mismatch" }),
+      Registration.countDocuments({ eventId, paymentStatus: "duplicate_claim" }),
+      Registration.countDocuments({ eventId, paymentStatus: "payment_verified" })
+    ]);
+    const expGross = expectedGross[0]?.total || 0;
+    const cap = captured[0]?.total || 0;
+    const ref = refunded[0]?.total || 0;
+    const failedTotal = failed[0]?.total || 0;
+    const failedCount = failed[0]?.count || 0;
+    const estimatedFees = Math.round(cap * 0.02 * 100) / 100;
+    const estimatedNet = cap - ref - estimatedFees;
+    res.json({
+      expectedGross: expGross,
+      captured: cap,
+      refunded: ref,
+      failedTotal,
+      failedCount,
+      estimatedFees,
+      estimatedNet,
+      difference: expGross - cap,
+      regsWithoutPayment,
+      paymentsWithoutReg,
+      mismatches,
+      duplicates,
+      verified,
+      feesNote: "Estimated at ~2%. Actual fees may vary based on payment method and Razorpay plan."
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1214,9 +1274,42 @@ app.post("/api/events/:eventId/verify-setup", auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ============ HEALTH ============
+// ============ HEALTH & MONITORING ============
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", service: "eventpay-sentinel", database: mongoose.connection.readyState === 1 ? "connected" : "disconnected" });
+  res.json({
+    status: "ok",
+    service: "formpay",
+    version: "1.0.0",
+    database: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+    uptime: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+    checks: {
+      mongodb: mongoose.connection.readyState === 1,
+      groqAi: Boolean(process.env.GROQ_API_KEY),
+      googleAuth: Boolean(process.env.GOOGLE_CLIENT_ID)
+    }
+  });
+});
+
+app.get("/api/events/:eventId/health", auth, async (req, res) => {
+  try {
+    const event = await Event.findById(req.params.eventId);
+    if (!event) return res.status(404).json({ error: "Event not found" });
+    const lastPayment = await PaymentEvent.findOne({ eventId: req.params.eventId }).sort({ createdAt: -1 });
+    const lastReg = await Registration.findOne({ eventId: req.params.eventId }).sort({ createdAt: -1 });
+    const openRisks = await RiskQueue.countDocuments({ eventId: req.params.eventId, status: "open" });
+    res.json({
+      event: { name: event.name, status: event.status },
+      razorpay: Boolean(event.razorpayKeyId && event.razorpayKeySecret),
+      webhookSecret: Boolean(event.razorpayWebhookSecret),
+      googleForm: Boolean(event.googleFormUrl),
+      intakeToken: Boolean(event.intakeToken),
+      lastPaymentAt: lastPayment?.createdAt || null,
+      lastRegistrationAt: lastReg?.createdAt || null,
+      openRiskCases: openRisks,
+      dataAge: lastPayment ? `${Math.floor((Date.now() - new Date(lastPayment.createdAt)) / 60000)} min ago` : "No payments yet"
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ============ SERVE CLIENT IN PRODUCTION ============
