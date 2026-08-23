@@ -12,6 +12,15 @@ import { User, Event, Registration, PaymentEvent, RiskQueue, MessageLog, AuditLo
 const app = express();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || "eventpay-sentinel-secret";
+function getRazorpayKeys(event) {
+  return {
+    keyId: event.razorpayKeyId || process.env.RAZORPAY_KEY_ID,
+    keySecret: event.razorpayKeySecret || process.env.RAZORPAY_KEY_SECRET
+  };
+}
+function razorpayErrorMessage(error) {
+  return error?.error?.description || error?.description || error?.message || "Razorpay rejected the payment link request";
+}
 
 // ============ RAZORPAY WEBHOOK (raw body needed) ============
 app.post("/api/webhooks/razorpay", express.raw({ type: "application/json" }), async (req, res) => {
@@ -193,8 +202,10 @@ app.post("/api/events/:eventId/registrations", auth, async (req, res) => {
     const reg = await Registration.create({ eventId: event._id, registrationId, name, phone, email: email || "", college: college || "", ticketType, expectedAmount, numberOfTickets: numberOfTickets || 1, entryToken });
 
     // Create Razorpay payment link if configured
-    const rzpKeyId = event.razorpayKeyId;
-    const rzpKeySecret = event.razorpayKeySecret;
+    const { keyId: rzpKeyId, keySecret: rzpKeySecret } = getRazorpayKeys(event);
+    if (!rzpKeyId || !rzpKeySecret) {
+      return res.status(503).json({ error: "Razorpay is not configured. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Secrets, or connect Razorpay keys when creating the event." });
+    }
     if (rzpKeyId && rzpKeySecret) {
       try {
         const razorpay = new Razorpay({ key_id: rzpKeyId, key_secret: rzpKeySecret });
@@ -211,7 +222,10 @@ app.post("/api/events/:eventId/registrations", auth, async (req, res) => {
         reg.paymentLinkUrl = link.short_url;
         reg.orderId = link.order_id || "";
         await reg.save();
-      } catch (e) { console.error("Payment link creation failed:", e.message); }
+      } catch (e) {
+        console.error("Payment link creation failed:", razorpayErrorMessage(e));
+        return res.status(502).json({ error: `Razorpay payment link failed: ${razorpayErrorMessage(e)}` });
+      }
     }
 
     await AuditLog.create({ eventId: event._id, actorId: req.userId, actorRole: req.role, action: "registration.created", target: registrationId });
@@ -244,8 +258,10 @@ app.post("/api/intake/:intakeToken", async (req, res) => {
     const reg = await Registration.create({ eventId: event._id, registrationId, name, phone, email: email || "", college: college || "", ticketType: ticket.name, expectedAmount, numberOfTickets: 1, entryToken });
 
     // Create Razorpay payment link using event-level keys
-    const rzpKeyId = event.razorpayKeyId;
-    const rzpKeySecret = event.razorpayKeySecret;
+    const { keyId: rzpKeyId, keySecret: rzpKeySecret } = getRazorpayKeys(event);
+    if (!rzpKeyId || !rzpKeySecret) {
+      return res.status(503).json({ error: "Razorpay is not configured. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Secrets, or connect Razorpay keys when creating the event." });
+    }
     if (rzpKeyId && rzpKeySecret) {
       try {
         const razorpay = new Razorpay({ key_id: rzpKeyId, key_secret: rzpKeySecret });
@@ -262,7 +278,10 @@ app.post("/api/intake/:intakeToken", async (req, res) => {
         reg.paymentLinkUrl = link.short_url;
         reg.orderId = link.order_id || "";
         await reg.save();
-      } catch (e) { console.error("Intake payment link creation failed:", e.message); }
+      } catch (e) {
+        console.error("Intake payment link creation failed:", razorpayErrorMessage(e));
+        return res.status(502).json({ error: `Razorpay payment link failed: ${razorpayErrorMessage(e)}` });
+      }
     }
 
     res.status(201).json({ registrationId: reg.registrationId, expectedAmount, category: ticket.name, paymentLinkUrl: reg.paymentLinkUrl || "" });
