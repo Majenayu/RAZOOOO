@@ -1315,7 +1315,7 @@ app.post("/api/events/:eventId/demo-seed", auth, async (req, res) => {
       const utr = p.duplicate ? sharedUTR : (p.paid ? "UTR" + crypto.randomBytes(6).toString("hex").toUpperCase() : "");
 
       const reg = await Registration.create({
-        eventId, registrationId, name: p.name, phone: p.phone, email: p.email,
+        eventId, isDemo: true, registrationId, name: p.name, phone: p.phone, email: p.email,
         college: "Demo College", ticketType, expectedAmount: price,
         numberOfTickets: 1, entryToken, paymentStatus: p.status, entryStatus: p.entry,
         riskScore: p.suspicious ? 75 : p.duplicate ? 80 : p.amountPaid ? 60 : 0,
@@ -1329,7 +1329,7 @@ app.post("/api/events/:eventId/demo-seed", auth, async (req, res) => {
       // Create payment event for paid participants
       if (p.paid) {
         await PaymentEvent.create({
-          eventId, registrationId, razorpayPaymentId: "pay_demo_" + crypto.randomBytes(6).toString("hex"),
+          eventId, isDemo: true, registrationId, razorpayPaymentId: "pay_demo_" + crypto.randomBytes(6).toString("hex"),
           utr, amount: p.amountPaid || price, currency: "INR",
           status: "captured", method: ["upi", "card", "netbanking"][Math.floor(Math.random() * 3)],
           contact: p.phone, email: p.email, matched: true, matchConfidence: p.duplicate ? 40 : p.amountPaid ? 70 : 95,
@@ -1341,21 +1341,21 @@ app.post("/api/events/:eventId/demo-seed", auth, async (req, res) => {
     // Create risk queue entries
     const mismatchReg = createdRegs.find(r => r.paymentStatus === "amount_mismatch");
     if (mismatchReg) {
-      await RiskQueue.create({ eventId, registrationId: mismatchReg.registrationId, type: "amount_mismatch", severity: "high", details: { expected: price, received: price - 100, confidence: 70 }, status: "open" });
+       await RiskQueue.create({ eventId, isDemo: true, registrationId: mismatchReg.registrationId, type: "amount_mismatch", severity: "high", details: { expected: price, received: price - 100, confidence: 70 }, status: "open" });
     }
     const dupReg = createdRegs.find(r => r.paymentStatus === "duplicate_claim");
     if (dupReg) {
-      await RiskQueue.create({ eventId, registrationId: dupReg.registrationId, type: "duplicate_utr", severity: "critical", details: { sharedUTR, otherRegistrations: [createdRegs[0].registrationId] }, status: "open" });
+       await RiskQueue.create({ eventId, isDemo: true, registrationId: dupReg.registrationId, type: "duplicate_utr", severity: "critical", details: { sharedUTR, otherRegistrations: [createdRegs[0].registrationId] }, status: "open" });
     }
     const suspReg = createdRegs.find(r => r.paymentStatus === "suspicious");
     if (suspReg) {
-      await RiskQueue.create({ eventId, registrationId: suspReg.registrationId, type: "timing_anomaly", severity: "medium", details: { reason: "Payment received after event registration cutoff" }, status: "open" });
+       await RiskQueue.create({ eventId, isDemo: true, registrationId: suspReg.registrationId, type: "timing_anomaly", severity: "medium", details: { reason: "Payment received after event registration cutoff" }, status: "open" });
     }
 
     // Create audit log entries
-    await AuditLog.create({ eventId, actorId: req.userId, actorRole: "organizer", action: "demo.seeded", target: "event", reason: `Seeded ${demoParticipants.length} demo registrations` });
+    await AuditLog.create({ eventId, isDemo: true, actorId: req.userId, actorRole: "organizer", action: "demo.seeded", target: "event", reason: `Seeded ${demoParticipants.length} demo registrations` });
     for (const r of createdRegs.filter(r => r.entryStatus === "checked_in")) {
-      await AuditLog.create({ eventId, actorId: req.userId, actorRole: "volunteer", action: "entry.checked_in", target: r.registrationId });
+      await AuditLog.create({ eventId, isDemo: true, actorId: req.userId, actorRole: "volunteer", action: "entry.checked_in", target: r.registrationId });
     }
 
     res.json({ success: true, message: `Demo data created: ${createdRegs.length} registrations, 3 risk cases, payment events`, count: createdRegs.length });
@@ -1368,13 +1368,13 @@ app.post("/api/events/:eventId/demo-reset", auth, async (req, res) => {
     const event = await Event.findById(req.params.eventId);
     if (!event || String(event.organizerId) !== String(req.userId)) return res.status(403).json({ error: "Not authorized" });
     await Promise.all([
-      Registration.deleteMany({ eventId: req.params.eventId }),
-      PaymentEvent.deleteMany({ eventId: req.params.eventId }),
-      RiskQueue.deleteMany({ eventId: req.params.eventId }),
-      MessageLog.deleteMany({ eventId: req.params.eventId }),
-      AuditLog.deleteMany({ eventId: req.params.eventId })
+      Registration.deleteMany({ eventId: req.params.eventId, isDemo: true }),
+      PaymentEvent.deleteMany({ eventId: req.params.eventId, isDemo: true }),
+      RiskQueue.deleteMany({ eventId: req.params.eventId, isDemo: true }),
+      MessageLog.deleteMany({ eventId: req.params.eventId, isDemo: true }),
+      AuditLog.deleteMany({ eventId: req.params.eventId, isDemo: true })
     ]);
-    res.json({ success: true, message: "All demo data cleared" });
+    res.json({ success: true, message: "Demo data cleared; your original data was kept" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

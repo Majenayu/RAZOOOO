@@ -636,10 +636,10 @@ function CommandCenter({ metrics, regs, risks, event, notify, reload }) {
     setDemoLoading(false);
   };
   const resetDemo = async () => {
-    if (!confirm("This will delete ALL registrations, payments, and risk data for this event. Continue?")) return;
+    if (!confirm("This will remove only the demo registrations, payments, and risk data. Your original event data will be kept. Continue?")) return;
     try {
       await api(`/api/events/${event._id}/demo-reset`, { method: "POST" });
-      notify("Demo data cleared");
+      notify("Demo data cleared; your original data was kept");
       reload();
     } catch (e) { notify(e.message); }
   };

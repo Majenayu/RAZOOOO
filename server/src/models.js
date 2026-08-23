@@ -44,6 +44,7 @@ const eventSchema = new mongoose.Schema({
 // ============ REGISTRATION ============
 const registrationSchema = new mongoose.Schema({
   eventId: { type: mongoose.Schema.Types.ObjectId, ref: "Event", required: true },
+  isDemo: { type: Boolean, default: false, index: true },
   registrationId: { type: String, required: true, unique: true },
   name: { type: String, required: true, trim: true },
   phone: { type: String, required: true },
@@ -69,6 +70,7 @@ const registrationSchema = new mongoose.Schema({
 // ============ PAYMENT EVENT ============
 const paymentEventSchema = new mongoose.Schema({
   eventId: { type: mongoose.Schema.Types.ObjectId, ref: "Event", required: true },
+  isDemo: { type: Boolean, default: false, index: true },
   registrationId: { type: String, default: "" },
   razorpayPaymentId: { type: String, default: "" },
   razorpayOrderId: { type: String, default: "" },
@@ -92,6 +94,7 @@ const paymentEventSchema = new mongoose.Schema({
 // ============ RISK QUEUE ============
 const riskQueueSchema = new mongoose.Schema({
   eventId: { type: mongoose.Schema.Types.ObjectId, ref: "Event", required: true },
+  isDemo: { type: Boolean, default: false, index: true },
   registrationId: { type: String, required: true },
   type: { type: String, enum: ["duplicate_utr", "amount_mismatch", "payment_not_found", "reused_payment", "refund_conflict", "timing_anomaly", "repeated_suspicious"], required: true },
   severity: { type: String, enum: ["low", "medium", "high", "critical"], default: "medium" },
@@ -104,6 +107,7 @@ const riskQueueSchema = new mongoose.Schema({
 // ============ MESSAGE LOG ============
 const messageLogSchema = new mongoose.Schema({
   eventId: { type: mongoose.Schema.Types.ObjectId, ref: "Event", required: true },
+  isDemo: { type: Boolean, default: false, index: true },
   registrationId: { type: String, default: "" },
   messageType: { type: String, enum: ["payment_verified", "payment_pending", "amount_mismatch", "suspicious", "entry_approved", "entry_held", "custom"], required: true },
   content: { type: String, required: true },
@@ -115,6 +119,7 @@ const messageLogSchema = new mongoose.Schema({
 // ============ AUDIT LOG ============
 const auditLogSchema = new mongoose.Schema({
   eventId: { type: mongoose.Schema.Types.ObjectId, ref: "Event" },
+  isDemo: { type: Boolean, default: false, index: true },
   actorId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   actorRole: { type: String, default: "" },
   action: { type: String, required: true },
