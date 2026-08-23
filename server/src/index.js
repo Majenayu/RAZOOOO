@@ -532,7 +532,9 @@ app.get("/api/events/:eventId/registrations/:regId/evidence", auth, async (req, 
     const payments = await PaymentEvent.find({ $or: [{ registrationId: reg.registrationId }, { eventId: req.params.eventId, contact: { $regex: reg.phone.slice(-10) } }] }).sort({ createdAt: -1 });
     const risks = await RiskQueue.find({ eventId: req.params.eventId, registrationId: reg.registrationId });
     const audits = await AuditLog.find({ eventId: req.params.eventId, target: reg.registrationId }).populate("actorId", "name").sort({ createdAt: -1 });
-    const duplicateClaims = await Registration.find({ eventId: req.params.eventId, utr: reg.utr, utr: { $ne: "" }, registrationId: { $ne: reg.registrationId } });
+    const duplicateClaims = reg.utr
+      ? await Registration.find({ eventId: req.params.eventId, utr: reg.utr, registrationId: { $ne: reg.registrationId } })
+      : [];
 
     // Build timeline
     const timeline = [];

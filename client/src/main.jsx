@@ -690,6 +690,8 @@ function CommandCenter({ metrics, regs, risks, event, notify, reload }) {
 function Registrations({ event, regs, notify, reload }) {
   const [search, setSearch] = useState(""); const [filter, setFilter] = useState("");
   const [showAdd, setShowAdd] = useState(false);
+  const [evidenceData, setEvidenceData] = useState(null);
+  const [loadingEvidence, setLoadingEvidence] = useState(false);
   const [form, setForm] = useState({ name: "", phone: "", email: "", college: "", ticketType: event.ticketTypes?.[0]?.name || "", numberOfTickets: 1 });
 
   const filtered = regs.filter(r => {
@@ -705,6 +707,16 @@ function Registrations({ event, regs, notify, reload }) {
 
   const approve = async id => { try { await api(`/api/events/${event._id}/registrations/${id}/approve`, { method: "POST" }); notify("Approved"); reload(); } catch (e) { notify(e.message); } };
   const hold = async id => { try { await api(`/api/events/${event._id}/registrations/${id}/hold`, { method: "POST", body: JSON.stringify({ reason: "Manual hold" }) }); notify("Held"); reload(); } catch (e) { notify(e.message); } };
+  const viewEvidence = async regId => {
+    setLoadingEvidence(true);
+    try {
+      const data = await api(`/api/events/${event._id}/registrations/${regId}/evidence`);
+      setEvidenceData(data);
+    } catch (e) { notify(e.message); }
+    setLoadingEvidence(false);
+  };
+
+  if (evidenceData) return <EvidencePage data={evidenceData} onBack={() => setEvidenceData(null)} />;
 
   return <div className="page">
     <div className="page-head"><div><span className="eyebrow">PEOPLE & PAYMENTS</span><h1>Registrations</h1><p className="page-subtitle">{regs.length} people in this event. Search by name or ID to understand any payment instantly.</p></div><button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add registration</button></div>
@@ -715,7 +727,7 @@ function Registrations({ event, regs, notify, reload }) {
         <td>{money(r.expectedAmount)}</td><td>{money(r.amountReceived)}</td>
         <td><span className={`badge badge-${r.paymentStatus === "payment_verified" ? "green" : r.paymentStatus === "awaiting_payment" ? "yellow" : "red"}`}>{r.paymentStatus.replace(/_/g, " ")}</span></td>
         <td><span className={`badge badge-${r.entryStatus === "entry_approved" ? "green" : r.entryStatus === "checked_in" ? "blue" : r.entryStatus === "entry_held" ? "red" : "gray"}`}>{r.entryStatus.replace(/_/g, " ")}</span></td>
-        <td className="actions">{r.entryStatus !== "entry_approved" && r.entryStatus !== "checked_in" && <button className="btn-sm btn-primary" onClick={() => approve(r.registrationId)}>✓</button>}{r.entryStatus !== "entry_held" && <button className="btn-sm btn-ghost" onClick={() => hold(r.registrationId)}>Hold</button>}</td>
+        <td className="actions"><button className="btn-sm btn-ghost" onClick={() => viewEvidence(r.registrationId)} disabled={loadingEvidence}>Evidence</button>{r.entryStatus !== "entry_approved" && r.entryStatus !== "checked_in" && <button className="btn-sm btn-primary" onClick={() => approve(r.registrationId)}>✓</button>}{r.entryStatus !== "entry_held" && <button className="btn-sm btn-ghost" onClick={() => hold(r.registrationId)}>Hold</button>}</td>
       </tr>)}
     </tbody></table>{!filtered.length && <p className="empty">No registrations match</p>}</div>
     {showAdd && <Modal title="Add Registration" onClose={() => setShowAdd(false)}><form onSubmit={addReg} className="m-form">
