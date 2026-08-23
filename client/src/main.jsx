@@ -402,8 +402,10 @@ function CreateEventBtn({ onCreated }) {
         <div className="razorpay-guide">
           <div className="steps-list compact-steps">
             <div className="step"><span className="step-num">1</span><div><strong>Create a Razorpay account</strong><p>Go to <a href="https://dashboard.razorpay.com/signup" target="_blank" rel="noopener noreferrer">dashboard.razorpay.com</a> and sign up (free)</p></div></div>
-            <div className="step"><span className="step-num">2</span><div><strong>Get your API keys</strong><p>Dashboard → Settings → API Keys → Generate Key</p></div></div>
-            <div className="step"><span className="step-num">3</span><div><strong>Paste them below</strong><p>Key ID starts with <code>rzp_test_</code> (test mode) or <code>rzp_live_</code> (real payments)</p></div></div>
+            <div className="step"><span className="step-num">2</span><div><strong>Select "WhatsApp, SMS, or Email"</strong><p>When asked "Accept Payments on", choose <strong>"WhatsApp, SMS, or Email"</strong> — this is how payment links are sent to participants</p></div></div>
+            <div className="step"><span className="step-num">3</span><div><strong>Complete KYC verification</strong><p>Upload your PAN, Aadhaar/business docs as asked. This is required by RBI for accepting payments.</p></div></div>
+            <div className="step"><span className="step-num">4</span><div><strong>Generate API Keys</strong><p>After KYC is approved: Dashboard → Account & Settings → API Keys → Generate Key. Copy both the Key ID and Key Secret.</p></div></div>
+            <div className="step"><span className="step-num">5</span><div><strong>Paste them below</strong><p>Key ID starts with <code>rzp_test_</code> (test mode) or <code>rzp_live_</code> (real payments)</p></div></div>
           </div>
         </div>
       </div>
