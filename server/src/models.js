@@ -37,7 +37,8 @@ const eventSchema = new mongoose.Schema({
   fieldMapping: { type: mongoose.Schema.Types.Mixed, default: null },
   razorpayKeyId: { type: String, default: "" },
   razorpayKeySecret: { type: String, default: "" },
-  razorpayWebhookSecret: { type: String, default: "" }
+  razorpayWebhookSecret: { type: String, default: "" },
+  collaborators: [{ email: { type: String, required: true, lowercase: true, trim: true }, role: { type: String, enum: ["viewer", "editor"], default: "viewer" }, addedAt: { type: Date, default: Date.now } }]
 }, { timestamps: true });
 
 // ============ REGISTRATION ============

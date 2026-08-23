@@ -86,6 +86,24 @@ input,select,textarea{font:inherit}
 .delete-confirm p{font-size:13px;margin-bottom:8px}
 .delete-warning{font-size:12px;color:var(--red);background:var(--red-light);padding:10px 12px;border-radius:8px;line-height:1.5;margin-bottom:16px}
 
+/* Share Access */
+.share-section{max-width:600px}
+.share-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.share-form input{flex:1;min-width:200px;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;outline:none}
+.share-form input:focus{border-color:var(--accent)}
+.share-form select{padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:12px}
+.collab-list{display:flex;flex-direction:column;gap:8px}
+.collab-item{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--gray-light);border-radius:8px}
+.collab-info{display:flex;align-items:center;gap:10px}
+.collab-info strong{font-size:13px}
+.access-info{display:flex;flex-direction:column;gap:8px}
+.access-row{display:flex;gap:10px;font-size:12px;padding:8px 0;border-bottom:1px solid var(--border)}
+.access-row:last-child{border:none}
+.access-row strong{min-width:60px;color:var(--accent)}
+.access-row span{color:var(--text2)}
+.ec-owner{font-size:11px;color:var(--accent);font-weight:600;margin-top:2px}
+.shared-badge{font-size:10px;background:var(--accent-light);color:var(--accent);padding:4px 8px;border-radius:6px;font-weight:600}
+
 /* Sidebar */
 .sidebar{width:240px;background:#0f172a;color:#fff;padding:20px 14px;display:flex;flex-direction:column;flex-shrink:0;min-height:100vh}
 .sb-header{margin-bottom:20px}

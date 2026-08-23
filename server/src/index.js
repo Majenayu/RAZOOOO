@@ -7,46 +7,55 @@ import crypto from "node:crypto";
 import Groq from "groq-sdk";
 import Razorpay from "razorpay";
 import { OAuth2Client } from "google-auth-library";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { User, Event, Registration, PaymentEvent, RiskQueue, MessageLog, AuditLog } from "./models.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || "eventpay-sentinel-secret";
-function getRazorpayKeys(event) {
-  return {
-    keyId: event.razorpayKeyId,
-    keySecret: event.razorpayKeySecret
-  };
-}
-function razorpayErrorMessage(error) {
-  return error?.error?.description || error?.description || error?.message || "Razorpay rejected the payment link request";
-}
 
 // ============ RAZORPAY WEBHOOK (raw body needed) ============
 app.post("/api/webhooks/razorpay", express.raw({ type: "application/json" }), async (req, res) => {
-  if (!process.env.RAZORPAY_WEBHOOK_SECRET) return res.status(503).json({ error: "Webhook not configured" });
-  const signature = req.headers["x-razorpay-signature"];
-  const expected = crypto.createHmac("sha256", process.env.RAZORPAY_WEBHOOK_SECRET).update(req.body).digest("hex");
-  if (!signature || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return res.status(401).json({ error: "Invalid signature" });
   try {
-    const event = JSON.parse(req.body.toString("utf8"));
-    const payment = event.payload?.payment?.entity;
+    const body = req.body.toString("utf8");
+    const webhookEvent = JSON.parse(body);
+    const payment = webhookEvent.payload?.payment?.entity;
     if (!payment) return res.json({ received: true });
+
+    const eventId = payment.notes?.eventId || "";
+    
+    // Look up event to get its webhook secret for verification
+    let webhookSecret = "";
+    if (eventId) {
+      const evt = await Event.findById(eventId);
+      if (evt) webhookSecret = evt.razorpayWebhookSecret;
+    }
+
+    // Verify signature if webhook secret is configured
+    if (webhookSecret) {
+      const signature = req.headers["x-razorpay-signature"];
+      const expected = crypto.createHmac("sha256", webhookSecret).update(req.body).digest("hex");
+      if (!signature || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+        return res.status(401).json({ error: "Invalid signature" });
+      }
+    }
 
     // Store payment event
     const existing = await PaymentEvent.findOne({ razorpayPaymentId: payment.id });
     if (existing) return res.json({ received: true, duplicate: true });
 
     const regId = payment.notes?.registrationId || "";
-    const eventId = payment.notes?.eventId || "";
 
     const pe = await PaymentEvent.create({
       eventId: eventId || undefined, registrationId: regId, razorpayPaymentId: payment.id,
       razorpayOrderId: payment.order_id || "", paymentLinkId: payment.payment_link_id || "",
       utr: payment.acquirer_data?.utr || "", amount: payment.amount / 100, currency: payment.currency,
-      status: event.event === "payment.captured" ? "captured" : event.event === "payment.failed" ? "failed" : event.event === "payment.refunded" ? "refunded" : "authorized",
+      status: webhookEvent.event === "payment.captured" ? "captured" : webhookEvent.event === "payment.failed" ? "failed" : webhookEvent.event === "payment.refunded" ? "refunded" : "authorized",
       method: payment.method || "", contact: payment.contact || "", email: payment.email || "",
-      notes: payment.notes || {}, capturedAt: payment.captured ? new Date() : null, webhookEventId: event.event
+      notes: payment.notes || {}, capturedAt: payment.captured ? new Date() : null, webhookEventId: webhookEvent.event
     });
 
     // Auto-match to registration
@@ -142,7 +151,10 @@ app.post("/api/events", auth, async (req, res) => {
 
 app.get("/api/events", auth, async (req, res) => {
   try {
-    const events = await Event.find({ organizerId: req.userId }).sort({ createdAt: -1 });
+    const user = await User.findById(req.userId);
+    const userEmail = user?.email || "";
+    // Get events user owns OR is a collaborator on
+    const events = await Event.find({ $or: [{ organizerId: req.userId }, { "collaborators.email": userEmail }] }).populate("organizerId", "name email").sort({ createdAt: -1 });
     res.json(events);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -176,6 +188,36 @@ app.delete("/api/events/:id", auth, async (req, res) => {
       AuditLog.deleteMany({ eventId: req.params.id })
     ]);
     res.json({ success: true, message: "Event and all associated data deleted" });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============ SHARE ACCESS ============
+app.post("/api/events/:id/share", auth, async (req, res) => {
+  try {
+    const { email, role } = req.body;
+    if (!email) return res.status(400).json({ error: "Email is required" });
+    const event = await Event.findOne({ _id: req.params.id, organizerId: req.userId });
+    if (!event) return res.status(404).json({ error: "Event not found or you don't own it" });
+    // Check if already shared
+    const existing = event.collaborators.find(c => c.email === email.toLowerCase().trim());
+    if (existing) {
+      existing.role = role || "viewer";
+      await event.save();
+      return res.json({ collaborators: event.collaborators });
+    }
+    event.collaborators.push({ email: email.toLowerCase().trim(), role: role || "viewer" });
+    await event.save();
+    res.json({ collaborators: event.collaborators });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/api/events/:id/share/:email", auth, async (req, res) => {
+  try {
+    const event = await Event.findOne({ _id: req.params.id, organizerId: req.userId });
+    if (!event) return res.status(404).json({ error: "Event not found or you don't own it" });
+    event.collaborators = event.collaborators.filter(c => c.email !== decodeURIComponent(req.params.email).toLowerCase().trim());
+    await event.save();
+    res.json({ collaborators: event.collaborators });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -830,7 +872,7 @@ app.post("/api/events/:eventId/verify-setup", auth, async (req, res) => {
           customer: { name: "Test User", contact: "9999999999" },
           notify: { sms: false, email: false },
           notes: { test: "true", eventId: String(event._id) },
-          expire_by: Math.floor(Date.now() / 1000) + 300
+          expire_by: Math.floor(Date.now() / 1000) + 900
         });
         testPaymentLink = link.short_url;
         checks.push({ ok: true, label: "Payment Link Generation", msg: `Payment link created for "${testTicket.name}" (₹${testTicket.price}). Payments go to YOUR Razorpay account.` });
@@ -926,6 +968,14 @@ app.post("/api/events/:eventId/verify-setup", auth, async (req, res) => {
 // ============ HEALTH ============
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", service: "eventpay-sentinel", database: mongoose.connection.readyState === 1 ? "connected" : "disconnected" });
+});
+
+// ============ SERVE CLIENT IN PRODUCTION ============
+const clientDist = path.join(__dirname, "../../client/dist");
+app.use(express.static(clientDist));
+app.get("*", (req, res, next) => {
+  if (req.path.startsWith("/api")) return next();
+  res.sendFile(path.join(clientDist, "index.html"));
 });
 
 app.use((_req, res) => res.status(404).json({ error: "Route not found" }));

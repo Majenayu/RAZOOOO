@@ -217,12 +217,14 @@ function EventsApp() {
         <div className="ec-main" onClick={() => { setSelectedEvent(ev); setView("dashboard"); }}>
           <h3>{ev.name}</h3>
           <p>{new Date(ev.eventDate).toLocaleDateString("en-IN")}</p>
+          {ev.organizerId?.name && ev.organizerId._id !== user?.id && <p className="ec-owner">by {ev.organizerId.name}</p>}
           <div className="ec-cats">{ev.ticketTypes?.map((t, i) => <span key={i} className="cat-mini">{t.name} ₹{t.price}</span>)}</div>
           <span className={`badge badge-${ev.status}`}>{ev.status}</span>
         </div>
         <div className="ec-actions">
-          <button className="btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); setEditingEvent(ev); }}>Edit</button>
-          <button className="btn-ghost btn-sm btn-danger" onClick={(e) => { e.stopPropagation(); setDeleteConfirm(ev); }}>Delete</button>
+          {(!ev.organizerId?._id || ev.organizerId._id === user?.id) && <><button className="btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); setEditingEvent(ev); }}>Edit</button>
+          <button className="btn-ghost btn-sm btn-danger" onClick={(e) => { e.stopPropagation(); setDeleteConfirm(ev); }}>Delete</button></>}
+          {ev.organizerId?._id && ev.organizerId._id !== user?.id && <span className="shared-badge">Shared with you</span>}
         </div>
       </div>)}</div> : <p className="empty">No events yet. Create your first event to get started.</p>}
     </main>
@@ -555,7 +557,7 @@ function EventDashboard({ event, view, setView, onBack, notify, toast }) {
     ["dashboard", "command", "Command Center"],
     ["registrations", "intake", "Registrations"],
     ["risk", "risk", "Risk Queue"],
-    ["scanner", "entry", "Entry Scanner"],
+    ["sharing", "entry", "Share Access"],
     ["ai", "ai", "AI Investigate"],
     ["messages", "messages", "Messages"],
     ["reconciliation", "reconciliation", "Reconciliation"],
@@ -574,14 +576,14 @@ function EventDashboard({ event, view, setView, onBack, notify, toast }) {
       {view === "dashboard" && <CommandCenter metrics={metrics} regs={regs} risks={risks} event={event} notify={notify} reload={loadData} />}
       {view === "registrations" && <Registrations event={event} regs={regs} notify={notify} reload={loadData} />}
       {view === "risk" && <RiskQueueView event={event} risks={risks} regs={regs} notify={notify} reload={loadData} />}
-      {view === "scanner" && <EntryScanner event={event} notify={notify} reload={loadData} />}
+      {view === "sharing" && <ShareAccess event={event} notify={notify} />}
       {view === "ai" && <AIInvestigate event={event} notify={notify} />}
       {view === "messages" && <Messages event={event} messages={messages} notify={notify} reload={loadData} />}
       {view === "reconciliation" && <Reconciliation event={event} notify={notify} />}
       {view === "audit" && <AuditLogView event={event} />}
     </main>
     <nav className="mobile-bottom-nav" aria-label="Mobile dashboard navigation">
-      {[["dashboard", "command", "Home"], ["registrations", "intake", "Registrations"], ["risk", "risk", "Risk"], ["scanner", "entry", "Entry"]].map(([key, icon, label]) =>
+      {[["dashboard", "command", "Home"], ["registrations", "intake", "Registrations"], ["risk", "risk", "Risk"], ["sharing", "entry", "Share"]].map(([key, icon, label]) =>
         <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}>
           <SentinelIcon type={icon} size={21} /><span>{label}</span>
         </button>
@@ -686,36 +688,71 @@ function RiskQueueView({ event, risks, regs, notify, reload }) {
   </div>;
 }
 
-// ============ ENTRY SCANNER ============
-function EntryScanner({ event, notify, reload }) {
-  const [regId, setRegId] = useState(""); const [result, setResult] = useState(null); const [busy, setBusy] = useState(false);
+// ============ SHARE ACCESS ============
+function ShareAccess({ event, notify }) {
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("viewer");
+  const [collaborators, setCollaborators] = useState(event.collaborators || []);
+  const [busy, setBusy] = useState(false);
 
-  const scan = async e => {
-    e?.preventDefault(); if (!regId.trim()) return;
-    setBusy(true); setResult(null);
+  const addCollaborator = async (e) => {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setBusy(true);
     try {
-      const reg = await api(`/api/events/${event._id}/registrations/${regId.trim().toUpperCase()}`);
-      setResult(reg);
-    } catch (e) { setResult({ error: e.message }); }
+      const result = await api(`/api/events/${event._id}/share`, { method: "POST", body: JSON.stringify({ email: email.trim(), role }) });
+      setCollaborators(result.collaborators);
+      setEmail("");
+      notify("Access shared!");
+    } catch (e) { notify(e.message); }
     setBusy(false);
   };
 
-  const checkIn = async () => {
-    try { await api(`/api/events/${event._id}/entry/${result.registrationId}/check-in`, { method: "POST" }); notify("Checked in!"); setResult({ ...result, entryStatus: "checked_in" }); reload(); } catch (e) { notify(e.message); }
+  const removeCollaborator = async (emailToRemove) => {
+    try {
+      const result = await api(`/api/events/${event._id}/share/${encodeURIComponent(emailToRemove)}`, { method: "DELETE" });
+      setCollaborators(result.collaborators);
+      notify("Access removed");
+    } catch (e) { notify(e.message); }
   };
 
   return <div className="page">
-    <div className="page-head"><h1>Entry Scanner</h1></div>
-    <div className="scanner-box">
-      <form onSubmit={scan}><input className="scan-input" value={regId} onChange={e => setRegId(e.target.value)} placeholder="Enter REG ID or scan QR..." autoFocus /><button className="btn-primary" disabled={busy}>{busy ? "..." : "Check"}</button></form>
+    <div className="page-head"><h1>Share Access</h1></div>
+    <div className="share-section">
+      <div className="setup-section compact">
+        <h3>Invite people to this event</h3>
+        <p className="section-hint">Share access with team members. They'll see this event in their dashboard when they sign in with Google.</p>
+        <form onSubmit={addCollaborator} className="share-form">
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Enter email address..." required />
+          <select value={role} onChange={e => setRole(e.target.value)}>
+            <option value="viewer">Viewer (read-only)</option>
+            <option value="editor">Editor (can manage)</option>
+          </select>
+          <button className="btn-primary" disabled={busy}>{busy ? "..." : "Share"}</button>
+        </form>
+      </div>
+
+      <div className="setup-section compact">
+        <h3>People with access</h3>
+        {collaborators.length > 0 ? <div className="collab-list">
+          {collaborators.map((c, i) => <div key={i} className="collab-item">
+            <div className="collab-info">
+              <strong>{c.email}</strong>
+              <span className={`badge badge-${c.role === "editor" ? "blue" : "gray"}`}>{c.role}</span>
+            </div>
+            <button className="btn-ghost btn-sm btn-danger" onClick={() => removeCollaborator(c.email)}>Remove</button>
+          </div>)}
+        </div> : <p className="empty">No one else has access yet. Invite your team above.</p>}
+      </div>
+
+      <div className="setup-section compact">
+        <h3>Access levels</h3>
+        <div className="access-info">
+          <div className="access-row"><strong>Viewer</strong><span>Can see registrations, payments, metrics, and reports. Cannot edit event or approve entries.</span></div>
+          <div className="access-row"><strong>Editor</strong><span>Full access — can manage registrations, approve/hold entries, send messages, and view all data.</span></div>
+        </div>
+      </div>
     </div>
-    {result && !result.error && <div className={`scan-result ${result.entryStatus === "entry_approved" || result.entryStatus === "checked_in" ? "sr-green" : result.entryStatus === "entry_held" ? "sr-red" : "sr-yellow"}`}>
-       <h2>{result.entryStatus === "entry_approved" ? "ENTRY APPROVED" : result.entryStatus === "checked_in" ? "ALREADY CHECKED IN" : result.entryStatus === "entry_held" ? "ENTRY HELD" : "PAYMENT PENDING"}</h2>
-       <div className="sr-details"><p><strong>{result.name}</strong></p><p>{result.ticketType} · {money(result.expectedAmount)}</p><p>Payment: {result.paymentStatus.replace(/_/g, " ")}</p>{result.riskReasons?.length > 0 && <p className="reason"><span className="reason-mark">!</span> {result.riskReasons.join(", ")}</p>}</div>
-      {result.entryStatus === "entry_approved" && <button className="btn-primary btn-lg" onClick={checkIn}>Admit →</button>}
-      {result.entryStatus === "entry_held" && <p className="action-note">Send to payment help desk</p>}
-    </div>}
-    {result?.error && <div className="scan-result sr-red"><h2>NOT FOUND</h2><p>{result.error}</p></div>}
   </div>;
 }
 
