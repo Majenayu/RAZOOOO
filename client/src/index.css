@@ -557,3 +557,73 @@ tr.row-risk{background:#fff8f3}
 .live-indicator.live{color:var(--green);background:var(--green-light)}
 .live-indicator.disconnected{color:var(--gray)}
 .live-indicator.reconnecting{color:var(--yellow);background:var(--yellow-light)}
+
+/* Clarity-first content refresh */
+.eyebrow{display:block;color:#7c6ff0;font-size:10px;font-weight:800;letter-spacing:.13em;line-height:1.3;margin-bottom:7px}
+.page-subtitle{color:var(--text2);font-size:13px;line-height:1.55;margin-top:7px;max-width:620px}
+.workspace-intro{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;padding:28px 0 30px;border-bottom:1px solid var(--border);margin-bottom:28px}
+.workspace-intro h1{font-size:30px;letter-spacing:-1px}
+.workspace-intro p{color:var(--text2);font-size:14px;line-height:1.6;margin-top:7px}
+.workspace-intro .btn-primary{white-space:nowrap}
+.page-head>div:first-child h1{margin:0}
+.page-head:has(.eyebrow){align-items:flex-end}
+.cmd-actions{padding-bottom:2px}
+.m-card{min-height:126px}
+.m-icon{display:grid;place-items:center;width:25px;height:25px;border-radius:8px;background:var(--accent-light);color:var(--accent);font-size:15px;font-weight:800;margin-bottom:12px}
+.m-card.green .m-icon{background:var(--green-light);color:var(--green)}
+.m-card.yellow .m-icon{background:var(--yellow-light);color:var(--yellow)}
+.m-card.red .m-icon{background:var(--red-light);color:var(--red)}
+.m-help{display:block;color:#9aa2b4;font-size:10px;margin-top:5px}
+.fin-card small{display:block;color:#9aa2b4;font-size:10px;margin-top:7px}
+.command-insight{display:flex;align-items:center;gap:13px;background:#fff;border:1px solid #e1defd;border-left:4px solid var(--accent);border-radius:14px;padding:14px 16px;margin:0 0 18px;box-shadow:var(--shadow)}
+.insight-mark{display:grid;place-items:center;width:30px;height:30px;border-radius:10px;background:var(--accent-light);color:var(--accent);font-weight:800}
+.command-insight strong{font-size:12px}
+.command-insight p{color:var(--text2);font-size:11px;margin-top:3px;line-height:1.4}
+.command-insight .btn-ghost{margin-left:auto;white-space:nowrap}
+.card-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:13px}
+.card-heading h3{margin:0}
+.card-heading .eyebrow{margin-bottom:5px}
+.card-status,.queue-count,.case-status{display:inline-flex;align-items:center;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:.02em;padding:5px 9px;white-space:nowrap}
+.status-good{background:var(--green-light);color:var(--green)}
+.status-risk{background:var(--red-light);color:var(--red)}
+.queue-count{background:var(--accent-light);color:var(--accent);align-self:center}
+.evidence-head{align-items:flex-start!important}
+.evidence-head .back-link{margin-bottom:17px}
+.muted-id{font-size:13px;color:var(--text2);font-weight:500;letter-spacing:0}
+.case-critical,.case-high{background:var(--red-light);color:var(--red)}
+.case-medium{background:var(--yellow-light);color:var(--yellow)}
+.case-low{background:var(--green-light);color:var(--green)}
+.risk-card .rc-actions .btn-primary{box-shadow:none}
+.risk-card:hover{box-shadow:0 10px 26px rgba(27,35,66,.09);transform:translateY(-1px)}
+.ev-section h3{display:flex;align-items:center;gap:8px}
+.ev-section h3:after{content:"";height:2px;flex:1;background:var(--border);margin-left:5px}
+.empty{background:#fbfbfe;border:1px dashed var(--border);border-radius:10px}
+.ai-box:before{content:"Ask about a payment, a person, or a risk case";display:block;color:var(--text);font-size:14px;font-weight:700;margin-bottom:5px}
+.ai-safety-banner{line-height:1.5}
+.msg-list{max-width:780px}
+.msg-item{padding:15px 16px}
+.recon-grid{max-width:780px}
+.recon-row strong{font-variant-numeric:tabular-nums}
+.landing{max-width:1180px}
+.hero{padding:105px 0 72px;max-width:760px}
+.hero:before{content:"PAYMENT TRUST FOR LIVE EVENTS";display:inline-block;background:var(--accent-light);color:var(--accent);padding:7px 11px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:.12em;margin-bottom:18px}
+.hero h1{font-size:58px;letter-spacing:-2.5px}
+.hero p{max-width:650px;margin-left:auto;margin-right:auto}
+.features{padding-top:50px}
+.features h2{font-size:30px;letter-spacing:-.8px}
+.f-card{padding:26px;min-height:188px}
+.f-card h3{font-size:15px;margin-top:7px}
+.l-footer{margin-top:20px}
+
+@media(max-width:768px){
+  .workspace-intro{align-items:flex-start;flex-direction:column}
+  .workspace-intro h1{font-size:26px}
+  .workspace-intro .btn-primary{width:100%}
+  .command-insight{align-items:flex-start;flex-wrap:wrap}
+  .command-insight .btn-ghost{margin-left:43px}
+  .page-head:has(.eyebrow){align-items:flex-start}
+  .page-subtitle{font-size:12px}
+  .hero{padding:72px 0 55px}
+  .hero h1{font-size:38px;letter-spacing:-1.5px}
+  .hero p{font-size:15px}
+}

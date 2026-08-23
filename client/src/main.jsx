@@ -213,7 +213,14 @@ function EventsApp() {
   return <div className="app-shell">
     <header className="app-header"><div className="app-brand"><span className="brand-mark"><SentinelIcon size={17} /></span> EventPay Sentinel</div><div className="app-user"><span>{user?.name}</span><small>{user?.role}</small><button className="btn-ghost btn-sm" onClick={logout}>Logout</button></div></header>
     <main className="events-page">
-      <div className="page-head"><h1>Your Events</h1><CreateEventBtn onCreated={ev => { setEvents(p => [ev, ...p]); notify("Event created!"); }} /></div>
+      <div className="workspace-intro">
+        <div>
+          <span className="eyebrow">EVENT OPERATIONS</span>
+          <h1>Your events</h1>
+          <p>Choose an event to see payment health, fraud alerts, and who is ready to enter.</p>
+        </div>
+        <CreateEventBtn onCreated={ev => { setEvents(p => [ev, ...p]); notify("Event created!"); }} />
+      </div>
       {events.length ? <div className="events-grid">{events.map(ev => <div key={ev._id} className="event-card">
         <div className="ec-main" onClick={() => { setSelectedEvent(ev); setView("dashboard"); }}>
           <h3>{ev.name}</h3>
@@ -569,7 +576,7 @@ function EventDashboard({ event, view, setView, onBack, notify, toast }) {
     <div className="mobile-scrim" onClick={() => setMobileOpen(false)} />
     <aside className="sidebar">
       <div className="sb-header"><button className="back-link" onClick={onBack}>← Events</button><h3>{event.name}</h3><small>{event.venue} · {new Date(event.eventDate).toLocaleDateString("en-IN")}</small></div>
-       <nav>{navItems.map(([key, icon, label]) => <button key={key} className={view === key ? "active" : ""} onClick={() => { setView(key); setMobileOpen(false); }}><span><SentinelIcon type={icon} size={17} /></span>{label}</button>)}</nav>
+       <nav>{navItems.map(([key, icon, label]) => <button data-nav={key} key={key} className={view === key ? "active" : ""} onClick={() => { setView(key); setMobileOpen(false); }}><span><SentinelIcon type={icon} size={17} /></span>{label}</button>)}</nav>
       <div className="sb-footer"><span>{user?.name}</span><small>{user?.role}</small></div>
     </aside>
     <main className="main-view">
@@ -639,8 +646,12 @@ function CommandCenter({ metrics, regs, risks, event, notify, reload }) {
   const exportReport = () => { window.open(`/api/events/${event._id}/export/report?token=${getToken()}`, "_blank"); };
 
   return <div className="page">
-    <div className="page-head">
-      <h1>Command Center</h1>
+      <div className="page-head">
+      <div>
+        <span className="eyebrow">LIVE EVENT PULSE</span>
+        <h1>Command Center</h1>
+        <p className="page-subtitle">A clear view of payment truth and entry readiness for {event.name}.</p>
+      </div>
       <div className="cmd-actions">
         <span className={`live-indicator ${sseStatus}`}>{sseStatus === "live" ? "● Live" : "○ " + sseStatus}</span>
         <button className="btn-ghost btn-sm" onClick={reload}>↻ Refresh</button>
@@ -650,26 +661,27 @@ function CommandCenter({ metrics, regs, risks, event, notify, reload }) {
       </div>
     </div>
     <div className="metrics-grid">
-      <div className="m-card"><span className="m-num">{m.totalRegs || 0}</span><span className="m-label">Total registrations</span></div>
-      <div className="m-card green"><span className="m-num">{m.verified || 0}</span><span className="m-label">Payments verified</span></div>
-      <div className="m-card yellow"><span className="m-num">{m.awaiting || 0}</span><span className="m-label">Awaiting payment</span></div>
-      <div className="m-card orange"><span className="m-num">{m.mismatches || 0}</span><span className="m-label">Amount mismatches</span></div>
-      <div className="m-card red"><span className="m-num">{m.duplicates || 0}</span><span className="m-label">Duplicate claims</span></div>
-      <div className="m-card red"><span className="m-num">{m.suspicious || 0}</span><span className="m-label">Suspicious</span></div>
-      <div className="m-card purple"><span className="m-num">{m.riskCount || 0}</span><span className="m-label">Risk queue</span></div>
-      <div className="m-card blue"><span className="m-num">{m.checkedIn || 0}</span><span className="m-label">Checked in</span></div>
+      <div className="m-card"><span className="m-icon">◎</span><span className="m-num">{m.totalRegs || 0}</span><span className="m-label">People registered</span><span className="m-help">All event sign-ups</span></div>
+      <div className="m-card green"><span className="m-icon">✓</span><span className="m-num">{m.verified || 0}</span><span className="m-label">Ready to enter</span><span className="m-help">Payment confirmed</span></div>
+      <div className="m-card yellow"><span className="m-icon">◷</span><span className="m-num">{m.awaiting || 0}</span><span className="m-label">Waiting for payment</span><span className="m-help">Follow up needed</span></div>
+      <div className="m-card red"><span className="m-icon">!</span><span className="m-num">{(m.riskCount || 0)}</span><span className="m-label">Need your attention</span><span className="m-help">Open risk cases</span></div>
+    </div>
+    <div className="command-insight">
+      <div className="insight-mark">!</div>
+      <div><strong>{m.riskCount ? `${m.riskCount} case${m.riskCount === 1 ? "" : "s"} need review` : "No urgent payment issues"}</strong><p>{m.riskCount ? "Review the evidence before approving entry. Suspicious cases stay safely on hold." : "Your payment records are clear. Keep an eye on the live feed as registrations arrive."}</p></div>
+      <button className="btn-ghost btn-sm" onClick={() => document.querySelector('[data-nav="risk"]')?.click()}>Open risk queue →</button>
     </div>
     <div className="finance-row">
-      <div className="fin-card"><span>Expected</span><strong>{money(m.expectedTotal)}</strong></div>
-      <div className="fin-card green"><span>Verified</span><strong>{money(m.verifiedTotal)}</strong></div>
-      <div className="fin-card yellow"><span>Gap</span><strong>{money((m.expectedTotal || 0) - (m.verifiedTotal || 0))}</strong></div>
+      <div className="fin-card"><span>Expected collection</span><strong>{money(m.expectedTotal)}</strong><small>Based on registrations</small></div>
+      <div className="fin-card green"><span>Payment value verified</span><strong>{money(m.verifiedTotal)}</strong><small>Safe to count</small></div>
+      <div className="fin-card yellow"><span>Still to reconcile</span><strong>{money((m.expectedTotal || 0) - (m.verifiedTotal || 0))}</strong><small>Pending or needs review</small></div>
     </div>
     <div className="dash-grid">
-      <div className="card"><h3>Entry Readiness</h3>
+      <div className="card"><div className="card-heading"><div><span className="eyebrow">GATE READINESS</span><h3>Who can enter now?</h3></div><span className="card-status status-good">Live</span></div>
         <div className="entry-bar"><div className="eb-fill" style={{width: `${m.totalRegs ? (m.verified||0)/m.totalRegs*100 : 0}%`}} /><span>{m.verified || 0} / {m.totalRegs || 0} can enter</span></div>
         <p className="note">{m.awaiting || 0} need payment · {m.mismatches || 0} need review · {m.held || 0} held</p>
       </div>
-      <div className="card"><h3>Recent Risk Alerts</h3>{risks.length ? risks.slice(0, 5).map(r => <div key={r._id} className="risk-item"><span className={`badge badge-${r.severity}`}>{r.severity}</span><strong>{r.registrationId}</strong><small>{r.type.replace(/_/g, " ")}</small></div>) : <p className="empty">No risk alerts</p>}</div>
+      <div className="card"><div className="card-heading"><div><span className="eyebrow">ACTION REQUIRED</span><h3>Recent risk alerts</h3></div><span className="card-status status-risk">{risks.length} open</span></div>{risks.length ? risks.slice(0, 5).map(r => <div key={r._id} className="risk-item"><span className={`badge badge-${r.severity}`}>{r.severity}</span><strong>{r.registrationId}</strong><small>{r.type.replace(/_/g, " ")}</small></div>) : <p className="empty">No risk alerts. Your queue is clear.</p>}</div>
     </div>
   </div>;
 }
@@ -695,7 +707,7 @@ function Registrations({ event, regs, notify, reload }) {
   const hold = async id => { try { await api(`/api/events/${event._id}/registrations/${id}/hold`, { method: "POST", body: JSON.stringify({ reason: "Manual hold" }) }); notify("Held"); reload(); } catch (e) { notify(e.message); } };
 
   return <div className="page">
-    <div className="page-head"><h1>Registrations ({regs.length})</h1><button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add Registration</button></div>
+    <div className="page-head"><div><span className="eyebrow">PEOPLE & PAYMENTS</span><h1>Registrations</h1><p className="page-subtitle">{regs.length} people in this event. Search by name or ID to understand any payment instantly.</p></div><button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add registration</button></div>
     <div className="filters"><input className="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, phone, or REG ID..." /><select value={filter} onChange={e => setFilter(e.target.value)}><option value="">All statuses</option><option value="awaiting_payment">Awaiting Payment</option><option value="payment_verified">Verified</option><option value="amount_mismatch">Mismatch</option><option value="duplicate_claim">Duplicate</option><option value="suspicious">Suspicious</option><option value="manual_review">Manual Review</option></select></div>
     <div className="table-wrap"><table><thead><tr><th>REG ID</th><th>Name</th><th>Phone</th><th>Ticket</th><th>Expected</th><th>Received</th><th>Payment</th><th>Entry</th><th>Actions</th></tr></thead><tbody>
       {filtered.map(r => <tr key={r._id} className={r.riskScore >= 60 ? "row-risk" : ""}>
@@ -748,7 +760,7 @@ function RiskQueueView({ event, risks, regs, notify, reload }) {
   if (evidenceData) return <EvidencePage data={evidenceData} onBack={() => setEvidenceData(null)} />;
 
   return <div className="page">
-    <div className="page-head"><h1>Risk Queue ({risks.length})</h1></div>
+    <div className="page-head"><div><span className="eyebrow">PROTECT YOUR EVENT</span><h1>Risk queue</h1><p className="page-subtitle">Review unusual payment activity before it becomes an entry problem.</p></div><span className="queue-count">{risks.length} open {risks.length === 1 ? "case" : "cases"}</span></div>
     {risks.length ? <div className="risk-list">{risks.map(r => {
       const reg = regs.find(x => x.registrationId === r.registrationId);
       return <div key={r._id} className={`risk-card risk-${r.severity}`}>
@@ -769,7 +781,7 @@ function RiskQueueView({ event, risks, regs, notify, reload }) {
 function EvidencePage({ data, onBack }) {
   const { registration: reg, payments, risks, timeline, riskBreakdown, riskBand, duplicateClaims } = data;
   return <div className="page">
-    <div className="page-head"><button className="back-link" onClick={onBack}>← Back to Risk Queue</button><h1>Evidence: {reg.registrationId}</h1></div>
+    <div className="page-head evidence-head"><div><button className="back-link" onClick={onBack}>← Back to Risk Queue</button><span className="eyebrow">INVESTIGATION CASE</span><h1>{reg.name} <span className="muted-id">{reg.registrationId}</span></h1><p className="page-subtitle">Everything the team needs to make a safe entry decision.</p></div><span className={`case-status case-${riskBand}`}>{riskBand} risk</span></div>
 
     <div className="evidence-grid">
       <div className="ev-section">
@@ -854,7 +866,7 @@ function ShareAccess({ event, notify }) {
   };
 
   return <div className="page">
-    <div className="page-head"><h1>Share Access</h1></div>
+    <div className="page-head"><div><span className="eyebrow">TEAM WORKSPACE</span><h1>Share access</h1><p className="page-subtitle">Give each teammate only the access they need to run the event safely.</p></div></div>
     <div className="share-section">
       <div className="setup-section compact">
         <h3>Invite people to this event</h3>
@@ -908,7 +920,7 @@ function AIInvestigate({ event, notify }) {
   const s = result?.structured;
 
   return <div className="page">
-    <div className="page-head"><h1>AI Investigation</h1></div>
+    <div className="page-head"><div><span className="eyebrow">EVIDENCE ASSISTANT</span><h1>Ask Sentinel</h1><p className="page-subtitle">Ask a question in plain language. Answers are based on your event's payment records.</p></div></div>
     <div className="ai-box">
       <div className="ai-safety-banner">AI is read-only. AI cannot approve entry, refund payments, or delete records. A human operator makes the final decision.</div>
       <div className="ai-presets">{presets.map(p => <button key={p} className="btn-ghost btn-sm" onClick={() => { setQuestion(p); ask(p); }}>{p}</button>)}</div>
@@ -947,7 +959,7 @@ function Messages({ event, messages, notify, reload }) {
     try { await api(`/api/events/${event._id}/messages/send`, { method: "POST", body: JSON.stringify({ registrationId: regId, messageType: type, content }) }); setContent(""); notify("Message sent"); reload(); } catch (e) { notify(e.message); }
   };
   return <div className="page">
-    <div className="page-head"><h1>Messages ({messages.length})</h1></div>
+    <div className="page-head"><div><span className="eyebrow">PARTICIPANT COMMUNICATION</span><h1>Messages</h1><p className="page-subtitle">Keep participants informed about payment status and entry instructions.</p></div><span className="queue-count">{messages.length} sent</span></div>
     <form onSubmit={send} className="msg-form">
       <input value={regId} onChange={e => setRegId(e.target.value)} placeholder="REG ID (optional)" />
       <select value={type} onChange={e => setType(e.target.value)}><option value="payment_verified">Payment Verified</option><option value="payment_pending">Payment Pending</option><option value="amount_mismatch">Amount Mismatch</option><option value="suspicious">Suspicious</option><option value="custom">Custom</option></select>
@@ -964,7 +976,7 @@ function Reconciliation({ event, notify }) {
   useEffect(() => { api(`/api/events/${event._id}/reconciliation`).then(setData).catch(e => notify(e.message)); }, [event._id]);
   if (!data) return <div className="page"><p>Loading...</p></div>;
   return <div className="page">
-    <div className="page-head"><h1>Reconciliation</h1></div>
+    <div className="page-head"><div><span className="eyebrow">MONEY CONTROL</span><h1>Reconciliation</h1><p className="page-subtitle">Understand every rupee between expected registrations and captured payments.</p></div></div>
     <div className="recon-grid">
       <div className="recon-row"><span>Expected gross collection</span><strong>{money(data.expectedGross)}</strong></div>
       <div className="recon-row"><span>Captured through Razorpay</span><strong className="green">{money(data.captured)}</strong></div>
@@ -990,7 +1002,7 @@ function AuditLogView({ event }) {
   const [logs, setLogs] = useState([]);
   useEffect(() => { api(`/api/events/${event._id}/audit`).then(setLogs).catch(() => {}); }, [event._id]);
   return <div className="page">
-    <div className="page-head"><h1>Audit Log</h1></div>
+    <div className="page-head"><div><span className="eyebrow">TRUST & ACCOUNTABILITY</span><h1>Audit log</h1><p className="page-subtitle">A clear record of what changed, who changed it, and when.</p></div></div>
     <div className="table-wrap"><table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Reason</th></tr></thead><tbody>
       {logs.map(l => <tr key={l._id}><td>{new Date(l.createdAt).toLocaleString()}</td><td>{l.actorId?.name || "System"}</td><td>{l.action}</td><td>{l.target}</td><td>{l.reason || "—"}</td></tr>)}
     </tbody></table>{!logs.length && <p className="empty">No audit entries yet</p>}</div>
