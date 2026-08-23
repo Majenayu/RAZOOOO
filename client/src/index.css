@@ -374,9 +374,91 @@ tr.row-risk{background:#fff7ed}
 
 /* Sentinel visual refresh */
 :root{
-  --bg:#f6f7fb;--card:#ffffff;--border:#e8eaf2;--text:#182033;--text2:#7b8499;
-  --accent:#635bff;--accent-light:#eeedff;--radius:14px;
-  --shadow:0 8px 24px rgba(27,35,66,.05);
+  --bg:#f4f6f8;--card:#ffffff;--border:#e4e8ed;--text:#15202b;--text2:#6c7885;
+  --accent:#176b87;--accent-light:#e6f4f7;--radius:16px;
+  --shadow:0 10px 30px rgba(21,32,43,.06);
+}
+body{background:var(--bg);color:var(--text)}
+.btn-primary{background:#176b87;border-radius:10px;box-shadow:0 5px 12px rgba(23,107,135,.18)}
+.btn-primary:hover{background:#12566e;box-shadow:0 7px 16px rgba(23,107,135,.24)}
+.btn-ghost{border-color:#d8e0e6;border-radius:10px;background:#fff}
+.btn-ghost:hover{border-color:#176b87;color:#176b87;background:#f3fafb}
+.brand-mark{background:#176b87;border-radius:9px;box-shadow:0 5px 12px rgba(23,107,135,.2)}
+
+/* Landing / auth */
+.landing{max-width:1180px}
+.l-header{padding:26px 0}
+.l-brand{font-size:18px;letter-spacing:-.35px}
+.hero{max-width:820px;padding:96px 0 84px}
+.hero::before{content:"SECURE EVENT OPERATIONS";display:inline-block;margin-bottom:20px;color:#176b87;font-size:11px;font-weight:800;letter-spacing:.16em}
+.hero h1{font-size:clamp(36px,6vw,68px);letter-spacing:-2.8px;color:#15202b;background:none;-webkit-text-fill-color:initial}
+.hero p{max-width:640px;margin:0 auto 30px;font-size:17px}
+.features{padding:36px 0 88px}
+.features h2{font-size:30px;letter-spacing:-.8px}
+.f-grid{gap:16px}
+.f-card{padding:24px;border-radius:16px;box-shadow:var(--shadow)}
+.f-card:hover{border-color:#a8d7df;box-shadow:0 14px 34px rgba(23,107,135,.12)}
+.f-card .feature-icon{background:#e6f4f7;color:#176b87;border-radius:13px}
+.differentiator{padding-bottom:76px}
+.diff-box{border-radius:20px!important;background:#15202b!important;box-shadow:0 18px 44px rgba(21,32,43,.16)}
+.diff-main.accent{color:#7dd3df!important}
+.auth-page{background:radial-gradient(circle at 15% 10%,#dff3f5 0,#f4f6f8 42%,#eef1f4 100%)}
+.auth-card{max-width:440px;padding:42px;border:1px solid rgba(255,255,255,.8);border-radius:22px;box-shadow:0 24px 60px rgba(21,32,43,.12)}
+.auth-card h1{letter-spacing:-.8px}
+
+/* Workspace shell */
+.app-header{height:72px!important;padding:0 28px!important;background:#15202b!important;border-bottom:0!important}
+.app-brand{color:#fff!important;font-size:16px!important}
+.app-user{color:#e1e9ed!important}
+.app-user small{color:#9fb3bc!important}
+.events-page{max-width:1180px!important;padding:52px 28px 80px!important}
+.workspace-intro{margin-bottom:32px!important}
+.workspace-intro h1{font-size:38px!important;letter-spacing:-1.4px}
+.workspace-intro p{font-size:14px!important;color:var(--text2)!important}
+.events-grid{gap:18px!important}
+.event-card{border:1px solid var(--border)!important;border-radius:18px!important;box-shadow:var(--shadow)!important;transition:transform .2s,box-shadow .2s,border-color .2s}
+.event-card:hover{transform:translateY(-3px);border-color:#abd5dc!important;box-shadow:0 18px 36px rgba(21,32,43,.1)!important}
+.ec-main{padding:24px!important}
+.ec-main h3{font-size:18px!important;letter-spacing:-.3px}
+.ec-actions{padding:12px 24px!important;background:#fafbfc;border-top:1px solid #eef1f3}
+.sidebar{background:#15202b!important;border-right:0!important}
+.sidebar .sb-brand{color:#fff!important}
+.sidebar .nav-item{color:#aebfc7!important;border-radius:10px!important}
+.sidebar .nav-item:hover,.sidebar .nav-item.active{background:#213744!important;color:#fff!important}
+.sidebar .nav-item.active{box-shadow:inset 3px 0 #7dd3df}
+.main-view{background:var(--bg)!important}
+.page{max-width:1180px!important;padding:34px 34px 72px!important}
+.page-head h1{font-size:30px!important;letter-spacing:-1px}
+.page-head p{color:var(--text2)!important}
+.card,.m-card,.fin-card,.risk-card,.recon-grid{border-radius:16px!important;box-shadow:var(--shadow)!important}
+.card{padding:22px!important}
+.m-card{padding:20px!important;text-align:left!important}
+.m-num{font-size:30px!important}
+.m-label{text-transform:uppercase;letter-spacing:.08em;font-weight:700}
+.finance-row{gap:16px!important}
+.fin-card{padding:20px!important}
+.metrics-grid{gap:16px!important}
+th{background:#f7f9fa!important}
+tr:hover{background:#f4fafb!important}
+.search,.filters select,input,select,textarea{border-radius:10px!important}
+.toast{background:#15202b!important;border-left:3px solid #7dd3df}
+
+@media(max-width:768px){
+  .l-header{padding:18px 0}
+  .l-nav .btn-primary{padding:9px 12px;font-size:11px}
+  .hero{padding:64px 0 54px}
+  .hero h1{letter-spacing:-1.7px}
+  .auth-card{padding:28px 22px}
+  .app-header{padding:0 16px!important}
+  .app-user>span{display:none}
+  .events-page{padding:34px 16px 60px!important}
+  .workspace-intro{gap:18px!important;align-items:flex-start!important;flex-direction:column!important}
+  .workspace-intro h1{font-size:32px!important}
+  .page{padding:26px 16px 56px!important}
+  .page-head{gap:14px!important}
+  .page-head h1{font-size:26px!important}
+  .card{padding:17px!important}
+  .finance-row{grid-template-columns:1fr!important}
 }
 body{background:var(--bg);color:var(--text)}
 button,input,select,textarea{font-family:inherit}
