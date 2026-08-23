@@ -1,5 +1,5 @@
 {
-  "name": "@eventpay/client",
+  "name": "formpay-client",
   "private": true,
   "version": "1.0.0",
   "type": "module",
