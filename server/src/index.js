@@ -14,8 +14,8 @@ const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || "eventpay-sentinel-secret";
 function getRazorpayKeys(event) {
   return {
-    keyId: event.razorpayKeyId || process.env.RAZORPAY_KEY_ID,
-    keySecret: event.razorpayKeySecret || process.env.RAZORPAY_KEY_SECRET
+    keyId: event.razorpayKeyId,
+    keySecret: event.razorpayKeySecret
   };
 }
 function razorpayErrorMessage(error) {
@@ -204,7 +204,7 @@ app.post("/api/events/:eventId/registrations", auth, async (req, res) => {
     // Create Razorpay payment link if configured
     const { keyId: rzpKeyId, keySecret: rzpKeySecret } = getRazorpayKeys(event);
     if (!rzpKeyId || !rzpKeySecret) {
-      return res.status(503).json({ error: "Razorpay is not configured. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Secrets, or connect Razorpay keys when creating the event." });
+      return res.status(503).json({ error: "Razorpay is not configured for this event. Add the test Key ID and test Key Secret in this event's Razorpay setup." });
     }
     if (rzpKeyId && rzpKeySecret) {
       try {
@@ -216,6 +216,7 @@ app.post("/api/events/:eventId/registrations", auth, async (req, res) => {
           notify: { sms: true, email: Boolean(email) },
           notes: { registrationId, eventId: String(event._id) },
           callback_url: process.env.CLIENT_ORIGIN || "http://localhost:5000",
+           callback_method: "get",
           expire_by: Math.floor(Date.now() / 1000) + (event.paymentExpiryMinutes || 60) * 60
         });
         reg.paymentLinkId = link.id;
@@ -260,7 +261,7 @@ app.post("/api/intake/:intakeToken", async (req, res) => {
     // Create Razorpay payment link using event-level keys
     const { keyId: rzpKeyId, keySecret: rzpKeySecret } = getRazorpayKeys(event);
     if (!rzpKeyId || !rzpKeySecret) {
-      return res.status(503).json({ error: "Razorpay is not configured. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Secrets, or connect Razorpay keys when creating the event." });
+      return res.status(503).json({ error: "Razorpay is not configured for this event. Add the test Key ID and test Key Secret in this event's Razorpay setup." });
     }
     if (rzpKeyId && rzpKeySecret) {
       try {
@@ -272,6 +273,7 @@ app.post("/api/intake/:intakeToken", async (req, res) => {
           notify: { sms: true, email: Boolean(email) },
           notes: { registrationId, eventId: String(event._id) },
           callback_url: process.env.CLIENT_ORIGIN || "http://localhost:5000",
+           callback_method: "get",
           expire_by: Math.floor(Date.now() / 1000) + (event.paymentExpiryMinutes || 60) * 60
         });
         reg.paymentLinkId = link.id;
