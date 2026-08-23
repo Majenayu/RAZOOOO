@@ -659,6 +659,9 @@ Even if extractedLabels is empty, try to infer from the rawSnippet HTML what the
 const INTAKE_URL = "${intakeUrl}";
 
 function onFormSubmit(e) {
+  if (!e || !e.response) {
+    throw new Error("Do not run onFormSubmit manually. Submit the Google Form to trigger it, or run testIntakeEndpoint() to test the connection.");
+  }
   const responses = e.response.getItemResponses();
   
   // Field mapping (auto-detected from your form):
@@ -687,6 +690,23 @@ function onFormSubmit(e) {
   } catch (err) {
     Logger.log("EventPay Error: " + err.message);
   }
+}
+
+// Run this manually to test the EventPay intake connection without a form event.
+function testIntakeEndpoint() {
+  const payload = {
+    name: "Test Participant",
+    phone: "9999999999",
+    email: "test@example.com",
+    category: "General"
+  };
+  const response = UrlFetchApp.fetch(INTAKE_URL, {
+    method: "post",
+    contentType: "application/json",
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+  Logger.log("EventPay Test Response: " + response.getContentText());
 }
 
 // Run this ONCE to set up the auto-trigger
