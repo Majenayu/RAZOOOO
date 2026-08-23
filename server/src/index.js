@@ -1368,12 +1368,20 @@ app.post("/api/events/:eventId/demo-reset", auth, async (req, res) => {
     const event = await Event.findById(req.params.eventId);
     if (!event || String(event.organizerId) !== String(req.userId)) return res.status(403).json({ error: "Not authorized" });
     // Include demo records created before the isDemo marker was introduced.
+    // Keep this legacy match exact: generic demo-looking fields can belong to real users.
+    const legacyDemoEmails = [
+      "aarav@example.com", "priya@example.com", "rohit@example.com", "sneha@example.com",
+      "vikram@example.com", "ananya@example.com", "karthik@example.com", "megha@example.com",
+      "arjun@example.com", "diya@example.com", "raj@example.com", "pooja@example.com"
+    ];
+    const legacyDemoPhones = Array.from({ length: 12 }, (_, i) => `987654${String(3210 + i)}`);
     const demoRegs = await Registration.find({
       eventId: req.params.eventId,
       $or: [
         { isDemo: true },
         { paymentId: /^pay_demo_/ },
-        { college: "Demo College", email: /@example\.com$/i }
+        { email: { $in: legacyDemoEmails } },
+        { phone: { $in: legacyDemoPhones } }
       ]
     }).select("registrationId");
     const demoRegistrationIds = demoRegs.map(r => r.registrationId);
