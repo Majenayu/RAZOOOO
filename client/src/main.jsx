@@ -629,19 +629,19 @@ function CommandCenter({ metrics, regs, risks, event, notify, reload }) {
   const seedDemo = async () => {
     setDemoLoading(true);
     try {
-      const result = await api(`/api/events/${event._id}/demo-seed`, { method: "POST" });
-      notify(result.message);
+      const demoEvent = await api("/api/events", {
+        method: "POST",
+        body: JSON.stringify({
+          name: `Demo — ${event.name}`,
+          eventDate: event.eventDate,
+          ticketTypes: (event.ticketTypes?.length ? event.ticketTypes : [{ name: "General", price: 500 }]).map(t => ({ name: t.name, price: t.price, capacity: 9999 }))
+        })
+      });
+      const result = await api(`/api/events/${demoEvent._id}/demo-seed`, { method: "POST" });
+      notify(`Separate demo event created. Your original event was not changed.`);
       reload();
     } catch (e) { notify(e.message); }
     setDemoLoading(false);
-  };
-  const resetDemo = async () => {
-    if (!confirm("This will delete ALL registrations, payments, and risk data for this event. Continue?")) return;
-    try {
-      await api(`/api/events/${event._id}/demo-reset`, { method: "POST" });
-      notify("Demo data cleared");
-      reload();
-    } catch (e) { notify(e.message); }
   };
   const exportReport = () => { window.open(`/api/events/${event._id}/export/report?token=${getToken()}`, "_blank"); };
 
@@ -655,8 +655,7 @@ function CommandCenter({ metrics, regs, risks, event, notify, reload }) {
       <div className="cmd-actions">
         <span className={`live-indicator ${sseStatus}`}>{sseStatus === "live" ? "● Live" : "○ " + sseStatus}</span>
         <button className="btn-ghost btn-sm" onClick={reload}>↻ Refresh</button>
-        <button className="btn-ghost btn-sm" onClick={seedDemo} disabled={demoLoading}>{demoLoading ? "Seeding..." : "Demo Data"}</button>
-        <button className="btn-ghost btn-sm btn-danger" onClick={resetDemo}>Reset</button>
+        <button className="btn-ghost btn-sm" onClick={seedDemo} disabled={demoLoading}>{demoLoading ? "Creating demo..." : "Create demo event"}</button>
         <button className="btn-ghost btn-sm" onClick={exportReport}>Export Report</button>
       </div>
     </div>

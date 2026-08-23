@@ -1362,22 +1362,6 @@ app.post("/api/events/:eventId/demo-seed", auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Demo reset
-app.post("/api/events/:eventId/demo-reset", auth, async (req, res) => {
-  try {
-    const event = await Event.findById(req.params.eventId);
-    if (!event || String(event.organizerId) !== String(req.userId)) return res.status(403).json({ error: "Not authorized" });
-    await Promise.all([
-      Registration.deleteMany({ eventId: req.params.eventId }),
-      PaymentEvent.deleteMany({ eventId: req.params.eventId }),
-      RiskQueue.deleteMany({ eventId: req.params.eventId }),
-      MessageLog.deleteMany({ eventId: req.params.eventId }),
-      AuditLog.deleteMany({ eventId: req.params.eventId })
-    ]);
-    res.json({ success: true, message: "All demo data cleared" });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 // ============ REAL-TIME SSE ============
 const sseClients = new Map(); // eventId -> Set of response objects
 
