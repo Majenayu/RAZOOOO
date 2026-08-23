@@ -808,7 +808,8 @@ app.post("/api/events/:eventId/verify-setup", auth, async (req, res) => {
         razorpayOk = true;
         checks.push({ ok: true, label: "Razorpay Connection", msg: `Razorpay API credentials are valid (${rzpKeyId.substring(0, 12)}...)` });
       } catch (e) {
-        checks.push({ ok: false, label: "Razorpay Connection", msg: `Razorpay credentials failed: ${e.message}` });
+        const errMsg = e?.error?.description || e?.message || JSON.stringify(e);
+        checks.push({ ok: false, label: "Razorpay Connection", msg: `Razorpay credentials failed: ${errMsg}` });
       }
     } else {
       checks.push({ ok: false, label: "Razorpay Connection", msg: "No Razorpay API keys configured for this event — payment links will NOT be generated" });
@@ -820,8 +821,10 @@ app.post("/api/events/:eventId/verify-setup", auth, async (req, res) => {
       try {
         const razorpay = new Razorpay({ key_id: rzpKeyId, key_secret: rzpKeySecret });
         const testTicket = event.ticketTypes[0];
+        const amount = Number(testTicket.price) * 100;
+        if (!amount || amount <= 0) throw new Error(`Invalid price for category "${testTicket.name}": ₹${testTicket.price}`);
         const link = await razorpay.paymentLink.create({
-          amount: testTicket.price * 100,
+          amount: amount,
           currency: "INR",
           description: `[TEST] ${event.name} - ${testTicket.name}`,
           customer: { name: "Test User", contact: "9999999999" },
@@ -833,7 +836,8 @@ app.post("/api/events/:eventId/verify-setup", auth, async (req, res) => {
         checks.push({ ok: true, label: "Payment Link Generation", msg: `Payment link created for "${testTicket.name}" (₹${testTicket.price}). Payments go to YOUR Razorpay account.` });
         try { await razorpay.paymentLink.cancel(link.id); } catch {}
       } catch (e) {
-        checks.push({ ok: false, label: "Payment Link Generation", msg: `Failed to create payment link: ${e.message}` });
+        const errMsg = e?.error?.description || e?.message || JSON.stringify(e);
+        checks.push({ ok: false, label: "Payment Link Generation", msg: `Failed to create payment link: ${errMsg}` });
       }
     } else if (!razorpayOk) {
       checks.push({ ok: false, label: "Payment Link Generation", msg: "Skipped — Razorpay not connected" });
