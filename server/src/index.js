@@ -244,7 +244,8 @@ app.post("/api/events/:eventId/registrations", auth, async (req, res) => {
     const reg = await Registration.create({ eventId: event._id, registrationId, name, phone, email: email || "", college: college || "", ticketType, expectedAmount, numberOfTickets: numberOfTickets || 1, entryToken });
 
     // Create Razorpay payment link if configured
-    const { keyId: rzpKeyId, keySecret: rzpKeySecret } = getRazorpayKeys(event);
+    const rzpKeyId = event.razorpayKeyId;
+    const rzpKeySecret = event.razorpayKeySecret;
     if (!rzpKeyId || !rzpKeySecret) {
       return res.status(503).json({ error: "Razorpay is not configured for this event. Add the test Key ID and test Key Secret in this event's Razorpay setup." });
     }
@@ -301,7 +302,8 @@ app.post("/api/intake/:intakeToken", async (req, res) => {
     const reg = await Registration.create({ eventId: event._id, registrationId, name, phone, email: email || "", college: college || "", ticketType: ticket.name, expectedAmount, numberOfTickets: 1, entryToken });
 
     // Create Razorpay payment link using event-level keys
-    const { keyId: rzpKeyId, keySecret: rzpKeySecret } = getRazorpayKeys(event);
+    const rzpKeyId = event.razorpayKeyId;
+    const rzpKeySecret = event.razorpayKeySecret;
     if (!rzpKeyId || !rzpKeySecret) {
       return res.status(503).json({ error: "Razorpay is not configured for this event. Add the test Key ID and test Key Secret in this event's Razorpay setup." });
     }
