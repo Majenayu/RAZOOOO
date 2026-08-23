@@ -12,6 +12,15 @@ import { User, Event, Registration, PaymentEvent, RiskQueue, MessageLog, AuditLo
 const app = express();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || "eventpay-sentinel-secret";
+function getRazorpayKeys(event) {
+  return {
+    keyId: event.razorpayKeyId,
+    keySecret: event.razorpayKeySecret
+  };
+}
+function razorpayErrorMessage(error) {
+  return error?.error?.description || error?.description || error?.message || "Razorpay rejected the payment link request";
+}
 
 // ============ RAZORPAY WEBHOOK (raw body needed) ============
 app.post("/api/webhooks/razorpay", express.raw({ type: "application/json" }), async (req, res) => {
@@ -193,8 +202,10 @@ app.post("/api/events/:eventId/registrations", auth, async (req, res) => {
     const reg = await Registration.create({ eventId: event._id, registrationId, name, phone, email: email || "", college: college || "", ticketType, expectedAmount, numberOfTickets: numberOfTickets || 1, entryToken });
 
     // Create Razorpay payment link if configured
-    const rzpKeyId = event.razorpayKeyId;
-    const rzpKeySecret = event.razorpayKeySecret;
+    const { keyId: rzpKeyId, keySecret: rzpKeySecret } = getRazorpayKeys(event);
+    if (!rzpKeyId || !rzpKeySecret) {
+      return res.status(503).json({ error: "Razorpay is not configured for this event. Add the test Key ID and test Key Secret in this event's Razorpay setup." });
+    }
     if (rzpKeyId && rzpKeySecret) {
       try {
         const razorpay = new Razorpay({ key_id: rzpKeyId, key_secret: rzpKeySecret });
@@ -205,13 +216,17 @@ app.post("/api/events/:eventId/registrations", auth, async (req, res) => {
           notify: { sms: true, email: Boolean(email) },
           notes: { registrationId, eventId: String(event._id) },
           callback_url: process.env.CLIENT_ORIGIN || "http://localhost:5000",
+           callback_method: "get",
           expire_by: Math.floor(Date.now() / 1000) + (event.paymentExpiryMinutes || 60) * 60
         });
         reg.paymentLinkId = link.id;
         reg.paymentLinkUrl = link.short_url;
         reg.orderId = link.order_id || "";
         await reg.save();
-      } catch (e) { console.error("Payment link creation failed:", e.message); }
+      } catch (e) {
+        console.error("Payment link creation failed:", razorpayErrorMessage(e));
+        return res.status(502).json({ error: `Razorpay payment link failed: ${razorpayErrorMessage(e)}` });
+      }
     }
 
     await AuditLog.create({ eventId: event._id, actorId: req.userId, actorRole: req.role, action: "registration.created", target: registrationId });
@@ -244,8 +259,10 @@ app.post("/api/intake/:intakeToken", async (req, res) => {
     const reg = await Registration.create({ eventId: event._id, registrationId, name, phone, email: email || "", college: college || "", ticketType: ticket.name, expectedAmount, numberOfTickets: 1, entryToken });
 
     // Create Razorpay payment link using event-level keys
-    const rzpKeyId = event.razorpayKeyId;
-    const rzpKeySecret = event.razorpayKeySecret;
+    const { keyId: rzpKeyId, keySecret: rzpKeySecret } = getRazorpayKeys(event);
+    if (!rzpKeyId || !rzpKeySecret) {
+      return res.status(503).json({ error: "Razorpay is not configured for this event. Add the test Key ID and test Key Secret in this event's Razorpay setup." });
+    }
     if (rzpKeyId && rzpKeySecret) {
       try {
         const razorpay = new Razorpay({ key_id: rzpKeyId, key_secret: rzpKeySecret });
@@ -256,13 +273,17 @@ app.post("/api/intake/:intakeToken", async (req, res) => {
           notify: { sms: true, email: Boolean(email) },
           notes: { registrationId, eventId: String(event._id) },
           callback_url: process.env.CLIENT_ORIGIN || "http://localhost:5000",
+           callback_method: "get",
           expire_by: Math.floor(Date.now() / 1000) + (event.paymentExpiryMinutes || 60) * 60
         });
         reg.paymentLinkId = link.id;
         reg.paymentLinkUrl = link.short_url;
         reg.orderId = link.order_id || "";
         await reg.save();
-      } catch (e) { console.error("Intake payment link creation failed:", e.message); }
+      } catch (e) {
+        console.error("Intake payment link creation failed:", razorpayErrorMessage(e));
+        return res.status(502).json({ error: `Razorpay payment link failed: ${razorpayErrorMessage(e)}` });
+      }
     }
 
     res.status(201).json({ registrationId: reg.registrationId, expectedAmount, category: ticket.name, paymentLinkUrl: reg.paymentLinkUrl || "" });
@@ -659,6 +680,9 @@ Even if extractedLabels is empty, try to infer from the rawSnippet HTML what the
 const INTAKE_URL = "${intakeUrl}";
 
 function onFormSubmit(e) {
+  if (!e || !e.response) {
+    throw new Error("Do not run onFormSubmit manually. Submit the Google Form to trigger it, or run testIntakeEndpoint() to test the connection.");
+  }
   const responses = e.response.getItemResponses();
   
   // Field mapping (auto-detected from your form):
@@ -687,6 +711,23 @@ function onFormSubmit(e) {
   } catch (err) {
     Logger.log("EventPay Error: " + err.message);
   }
+}
+
+// Run this manually to test the EventPay intake connection without a form event.
+function testIntakeEndpoint() {
+  const payload = {
+    name: "Test Participant",
+    phone: "9999999999",
+    email: "test@example.com",
+    category: "General"
+  };
+  const response = UrlFetchApp.fetch(INTAKE_URL, {
+    method: "post",
+    contentType: "application/json",
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+  Logger.log("EventPay Test Response: " + response.getContentText());
 }
 
 // Run this ONCE to set up the auto-trigger
