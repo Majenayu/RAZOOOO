@@ -591,31 +591,149 @@ app.get("/api/events/:eventId/messages", auth, async (req, res) => {
 
 // ============ AI INVESTIGATION ============
 app.post("/api/events/:eventId/ai/investigate", auth, async (req, res) => {
-  if (!process.env.GROQ_API_KEY) return res.status(503).json({ error: "AI not configured" });
   try {
     const { question } = req.body;
     if (!question) return res.status(400).json({ error: "Question is required" });
     const eventId = req.params.eventId;
 
     // Gather context
-    const [metrics, regs, risks, payments] = await Promise.all([
+    const [metrics, regs, risks, payments, audits] = await Promise.all([
       Registration.aggregate([{ $match: { eventId: new mongoose.Types.ObjectId(eventId) } }, { $group: { _id: "$paymentStatus", count: { $sum: 1 }, total: { $sum: "$expectedAmount" }, received: { $sum: "$amountReceived" } } }]),
-      Registration.find({ eventId }).select("registrationId name paymentStatus entryStatus expectedAmount amountReceived riskReasons ticketType").limit(50),
-      RiskQueue.find({ eventId, status: "open" }).limit(20),
-      PaymentEvent.find({ eventId }).select("registrationId amount status razorpayPaymentId utr").limit(30)
+      Registration.find({ eventId }).select("registrationId name phone paymentStatus entryStatus expectedAmount amountReceived riskReasons riskScore ticketType utr paymentId").limit(50),
+      RiskQueue.find({ eventId, status: { $in: ["open", "reviewing"] } }).limit(20),
+      PaymentEvent.find({ eventId }).select("registrationId amount status razorpayPaymentId utr method contact matched matchConfidence").limit(30),
+      AuditLog.find({ eventId }).sort({ createdAt: -1 }).limit(20).select("action target reason createdAt")
     ]);
 
-    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-    const completion = await groq.chat.completions.create({
-      model: "openai/gpt-oss-120b", temperature: 0.2,
-      messages: [
-        { role: "system", content: `You are EventPay Sentinel AI — an investigation assistant for event payment verification. Answer questions using ONLY the provided data. Format: 1) Direct answer 2) Evidence 3) Risk level 4) Recommended action. If data is missing, say so. Support Hindi/Hinglish if asked. Never invent payment data.` },
-        { role: "user", content: JSON.stringify({ question, metrics, registrations: regs.slice(0, 20), risks, payments: payments.slice(0, 15) }) }
-      ]
-    });
-    res.json({ answer: completion.choices[0]?.message?.content || "Unable to generate response", question });
+    const contextData = { question, metrics, registrations: regs.slice(0, 30), risks, payments: payments.slice(0, 20), recentAuditActions: audits.slice(0, 10) };
+
+    // AI Safety Boundary
+    const safetyNote = "IMPORTANT: AI is READ-ONLY. AI cannot approve entry, refund payments, move money, or delete records. A human operator makes the final decision.";
+
+    // Try Groq AI first
+    if (process.env.GROQ_API_KEY) {
+      try {
+        const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+        const completion = await groq.chat.completions.create({
+          model: "openai/gpt-oss-120b", temperature: 0.2,
+          messages: [
+            { role: "system", content: `You are EventPay Sentinel AI — a payment fraud investigation assistant.
+
+RESPOND IN VALID JSON with this exact structure:
+{
+  "decision": "safe|suspicious|fraud|insufficient_data",
+  "riskLevel": "low|medium|high|critical",
+  "confidence": "high|medium|low",
+  "summary": "one-line conclusion",
+  "evidence": [
+    { "source": "Registration/Payment/RiskQueue/Audit", "id": "record ID", "fact": "what was found" }
+  ],
+  "missingInfo": ["what data would help but is not available"],
+  "recommendedAction": "what the operator should do",
+  "allowedActions": ["actions the operator CAN take"],
+  "forbiddenActions": ["actions that should NOT be taken without more evidence"],
+  "explanation": "2-3 sentence detailed explanation with reasoning"
+}
+
+Rules:
+- Use ONLY the provided data. Never invent payment IDs, UTRs, or amounts.
+- Every conclusion must cite a specific record as evidence.
+- If data is insufficient, say so with confidence: "low".
+- Support Hindi/Hinglish if the question is in Hindi.
+- ${safetyNote}` },
+            { role: "user", content: JSON.stringify(contextData) }
+          ]
+        });
+
+        let aiResponse = completion.choices[0]?.message?.content || "";
+        
+        // Try to parse structured response
+        let structured = null;
+        try {
+          const jsonMatch = aiResponse.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, aiResponse];
+          const jsonStr = jsonMatch[1].trim();
+          structured = JSON.parse(jsonStr);
+        } catch {
+          try {
+            const startIdx = aiResponse.indexOf("{");
+            const endIdx = aiResponse.lastIndexOf("}");
+            if (startIdx !== -1 && endIdx !== -1) structured = JSON.parse(aiResponse.substring(startIdx, endIdx + 1));
+          } catch {}
+        }
+
+        if (structured) {
+          structured.safetyBoundary = safetyNote;
+          structured.source = "ai";
+          return res.json({ structured, answer: structured.explanation || structured.summary, question });
+        }
+
+        // If parsing failed, return raw text
+        return res.json({ answer: aiResponse, question, structured: null, safetyBoundary: safetyNote, source: "ai" });
+      } catch (e) {
+        console.error("AI investigation error:", e.message);
+        // Fall through to rule-based fallback
+      }
+    }
+
+    // Rule-based fallback when AI is unavailable
+    const ruleResult = generateRuleBasedReport(question, regs, risks, payments, metrics);
+    res.json({ structured: ruleResult, answer: ruleResult.explanation, question, source: "rules", safetyBoundary: safetyNote });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
+
+// Rule-based investigation fallback
+function generateRuleBasedReport(question, regs, risks, payments, metrics) {
+  const q = question.toLowerCase();
+  const evidence = [];
+  let summary = "";
+  let riskLevel = "low";
+
+  // Detect question type and generate appropriate response
+  if (q.includes("duplicate") || q.includes("utr")) {
+    const dupes = regs.filter(r => r.paymentStatus === "duplicate_claim");
+    summary = dupes.length > 0 ? `Found ${dupes.length} duplicate claim(s)` : "No duplicate claims detected";
+    dupes.forEach(r => evidence.push({ source: "Registration", id: r.registrationId, fact: `Duplicate claim — ${r.name}, UTR: ${r.utr || "N/A"}` }));
+    if (dupes.length > 0) riskLevel = "high";
+  } else if (q.includes("mismatch") || q.includes("amount")) {
+    const mismatches = regs.filter(r => r.paymentStatus === "amount_mismatch");
+    summary = mismatches.length > 0 ? `${mismatches.length} amount mismatch(es) found` : "No amount mismatches";
+    mismatches.forEach(r => evidence.push({ source: "Registration", id: r.registrationId, fact: `Expected ₹${r.expectedAmount}, received ₹${r.amountReceived}` }));
+    if (mismatches.length > 0) riskLevel = "medium";
+  } else if (q.includes("pending") || q.includes("awaiting") || q.includes("not paid")) {
+    const pending = regs.filter(r => r.paymentStatus === "awaiting_payment");
+    summary = `${pending.length} registration(s) awaiting payment`;
+    pending.slice(0, 5).forEach(r => evidence.push({ source: "Registration", id: r.registrationId, fact: `${r.name} — ₹${r.expectedAmount} pending` }));
+  } else if (q.includes("risk") || q.includes("suspicious") || q.includes("fraud")) {
+    summary = risks.length > 0 ? `${risks.length} open risk case(s)` : "No open risk cases";
+    risks.slice(0, 5).forEach(r => evidence.push({ source: "RiskQueue", id: r.registrationId, fact: `${r.type.replace(/_/g, " ")} — severity: ${r.severity}` }));
+    if (risks.length > 0) riskLevel = "high";
+  } else if (q.includes("verified") || q.includes("paid") || q.includes("who can enter")) {
+    const verified = regs.filter(r => r.paymentStatus === "payment_verified");
+    summary = `${verified.length} participant(s) have verified payments and can enter`;
+    verified.slice(0, 5).forEach(r => evidence.push({ source: "Registration", id: r.registrationId, fact: `${r.name} — ₹${r.amountReceived} verified` }));
+  } else {
+    // General status
+    const totalRegs = regs.length;
+    const verified = regs.filter(r => r.paymentStatus === "payment_verified").length;
+    const pending = regs.filter(r => r.paymentStatus === "awaiting_payment").length;
+    summary = `Event has ${totalRegs} registrations: ${verified} verified, ${pending} pending, ${risks.length} risk cases`;
+    evidence.push({ source: "Metrics", id: "summary", fact: summary });
+  }
+
+  return {
+    decision: riskLevel === "high" ? "suspicious" : riskLevel === "medium" ? "suspicious" : "safe",
+    riskLevel,
+    confidence: "medium",
+    summary,
+    evidence,
+    missingInfo: ["AI analysis unavailable — using rule-based report"],
+    recommendedAction: risks.length > 0 ? "Review open risk cases before approving entries" : "No immediate action required",
+    allowedActions: ["View evidence", "Approve/hold registrations", "Resolve risk cases"],
+    forbiddenActions: ["Do not approve entries without reviewing payment status"],
+    explanation: `Rule-based analysis: ${summary}. ${risks.length > 0 ? "There are open risk cases that need human review." : "No critical issues detected."}`,
+    source: "rules"
+  };
+}
 
 // ============ AUDIT LOG ============
 app.get("/api/events/:eventId/audit", auth, async (req, res) => {
