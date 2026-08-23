@@ -923,10 +923,19 @@ function Reconciliation({ event, notify }) {
       <div className="recon-row"><span>Expected gross collection</span><strong>{money(data.expectedGross)}</strong></div>
       <div className="recon-row"><span>Captured through Razorpay</span><strong className="green">{money(data.captured)}</strong></div>
       <div className="recon-row"><span>Refunds</span><strong className="red">-{money(data.refunded)}</strong></div>
-      <div className="recon-row"><span>Razorpay fees (~2%)</span><strong className="red">-{money(data.fees)}</strong></div>
-      <div className="recon-row total"><span>Expected net settlement</span><strong>{money(data.expectedNet)}</strong></div>
+      <div className="recon-row"><span>Failed payments ({data.failedCount || 0})</span><strong className="red">{money(data.failedTotal)}</strong></div>
+      <div className="recon-row"><span>Estimated Razorpay fees (~2%)</span><strong className="red">-{money(data.estimatedFees)}</strong></div>
+      <div className="recon-row total"><span>Estimated net settlement</span><strong>{money(data.estimatedNet)}</strong></div>
       <div className="recon-row"><span>Gap (expected - captured)</span><strong className={data.difference > 0 ? "red" : "green"}>{money(data.difference)}</strong></div>
     </div>
+    <div className="recon-grid" style={{marginTop: "16px"}}>
+      <div className="recon-row"><span>Registrations without payment</span><strong>{data.regsWithoutPayment || 0}</strong></div>
+      <div className="recon-row"><span>Unmatched payments</span><strong>{data.paymentsWithoutReg || 0}</strong></div>
+      <div className="recon-row"><span>Amount mismatches</span><strong className="red">{data.mismatches || 0}</strong></div>
+      <div className="recon-row"><span>Duplicate claims</span><strong className="red">{data.duplicates || 0}</strong></div>
+      <div className="recon-row"><span>Verified payments</span><strong className="green">{data.verified || 0}</strong></div>
+    </div>
+    {data.feesNote && <p className="recon-note">{data.feesNote}</p>}
   </div>;
 }
 

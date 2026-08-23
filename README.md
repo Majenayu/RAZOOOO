@@ -1,124 +1,196 @@
-# EventPay Sentinel
+# FormPay
 
-> A real-time payment command center for mass events that connects registrations, Razorpay payment events, fraud signals, and participant communication in one trusted interface.
+**Google Form to Razorpay Payment Automation for Mass Events**
 
-**Core question it answers:** "Can this participant enter, and can I prove that their payment is genuine?"
+FormPay connects any Google Form to automated Razorpay payment links with real-time verification, fraud detection, and AI-powered investigation.
 
-## The Problem
+---
 
-During large Indian events (college fests, conferences, concerts), organizers use Google Forms + UPI QR + WhatsApp screenshots + Google Sheets + volunteers for manual verification. This breaks at scale:
+## What it does
 
-- Thousands of registrations arrive simultaneously
-- Participants enter wrong UTRs
-- One payment claimed by multiple people
-- Payment screenshots can be edited or reused
-- Volunteers cannot reliably verify payments at the gate
-- Organizers don't know actual amount collected
+> Thousands of people register for an event via Google Form. FormPay automatically sends each participant a Razorpay payment link, verifies payments cryptographically via webhooks, detects fraud (duplicate UTRs, amount mismatches, reused payments), and gives organizers a real-time command center.
 
-## How EventPay Sentinel Solves This
+**Razorpay confirms that a payment happened. FormPay confirms *which participant* owns that payment and whether they can safely enter the event.**
 
-```
-Registration → Payment Link → Razorpay Webhook → Cryptographic Verification →
-Risk Analysis → Entry Decision → QR Pass → Gate Scan → Audit Trail
-```
-
-## Features
-
-- **Registration Intake** — Google Forms integration or manual entry, unique REG IDs
-- **Razorpay Payment Verification** — Webhook signature verification, auto-matching
-- **Risk Engine** — Duplicate UTR detection, amount mismatch, payment-not-found, reused payments
-- **Command Center** — Live dashboard with metrics, risk alerts, entry readiness
-- **Entry Scanner** — Volunteer scans REG ID, instant approve/hold decision
-- **AI Investigation** — Ask questions like "Who can enter?" or "Show suspicious claims"
-- **Messaging** — Automated participant notifications
-- **Reconciliation** — Expected vs captured vs settled breakdown
-- **Audit Log** — Every action traced with actor, timestamp, reason
-
-## Tech Stack
-
-| Component | Technology |
-|-----------|-----------|
-| Frontend | React + Vite |
-| Backend | Node.js + Express 4 |
-| Database | MongoDB Atlas |
-| Payments | Razorpay (webhooks, payment links, QR) |
-| AI | Groq (Llama 3.3 70B) |
-| Email | Resend |
-| Auth | JWT + bcrypt |
-
-## Quick Start
-
-```bash
-git clone https://github.com/Majenayu/RAZOOOO.git
-cd RAZOOOO
-cp .env.example .env  # Fill in your keys
-npm install
-npm run dev
-```
-
-- Frontend: http://localhost:5000
-- API: http://localhost:3001
-
-## Demo Flow
-
-1. Register → Create event (RazorFest 2026 with 3 ticket types)
-2. Click "Seed demo data" → 6 registrations appear (verified, suspicious, mismatch, duplicate, pending)
-3. Command Center → See live metrics and risk alerts
-4. Risk Queue → Review critical/high alerts
-5. Entry Scanner → Check in verified participants
-6. AI → Ask "Who can enter right now?"
-7. Reconciliation → See expected vs captured gap
-
-## API Endpoints
-
-### Auth
-- `POST /api/auth/register` — Create account (organizer/volunteer/finance)
-- `POST /api/auth/login` — Login, get JWT
-
-### Events
-- `POST /api/events` — Create event with ticket types
-- `GET /api/events` — List your events
-- `GET /api/events/:id/metrics` — Live dashboard metrics
-
-### Registrations
-- `POST /api/events/:id/registrations` — Add registration (creates Razorpay link)
-- `POST /api/intake/:token` — Google Form intake (token-protected)
-- `GET /api/events/:id/registrations` — List all with filters
-
-### Payments & Verification
-- `POST /api/webhooks/razorpay` — Webhook (signature verified)
-- `GET /api/events/:id/payments` — All payment events
-
-### Risk & Entry
-- `GET /api/events/:id/risk-queue` — Open risk alerts
-- `POST /api/events/:id/registrations/:regId/approve` — Approve entry
-- `POST /api/events/:id/registrations/:regId/hold` — Hold entry
-- `POST /api/events/:id/entry/:regId/check-in` — Gate check-in
-- `GET /api/entry-pass/:token` — Verify entry pass
-
-### AI & Reports
-- `POST /api/events/:id/ai/investigate` — Ask AI questions
-- `GET /api/events/:id/reconciliation` — Financial reconciliation
-- `GET /api/events/:id/audit` — Audit trail
+---
 
 ## Architecture
 
 ```
-Client [React + Vite] → API [Express + JWT]
-                              ↓
-                        MongoDB Atlas
-                              ↓
-              Razorpay Webhooks → Payment Matching → Risk Engine
-                              ↓
-                        Groq AI (Investigation)
+Google Form (any structure)
+       |
+       v
+Apps Script (auto-generated by AI)
+       |
+       v
+FormPay Intake Endpoint
+       |
+       v
+Registration Created + Razorpay Payment Link Generated
+       |
+       v
+Participant pays via SMS/Email link
+       |
+       v
+Razorpay Webhook (cryptographically signed)
+       |
+       v
+Payment Matching Engine (confidence scoring)
+       |
+       v
+Risk Detection (duplicates, mismatches, fraud)
+       |
+       v
+AI Investigation (evidence-based, with citations)
+       |
+       v
+Human Decision (approve/hold/dismiss)
+       |
+       v
+Audit Trail (every action logged)
 ```
 
-## Positioning
+---
 
-> **"The trust and operations layer for high-volume Indian digital payments."**
+## Key Features
 
-Not a Google Form payment tracker. A real-time verification command center that proves payment authenticity cryptographically.
+### Payment Pipeline
+- **Per-event Razorpay keys** — each organizer uses their own account, money goes directly to them
+- **Auto-generated payment links** — sent via SMS/email when a form is submitted
+- **Webhook verification** — cryptographic signature validation (HMAC-SHA256)
+- **Payment matching engine** — confidence-based scoring (registration ID, amount, phone, order ID)
+- **Replay protection** — duplicate webhooks are detected and ignored
+
+### Fraud Detection
+- **Risk scoring** — explainable with breakdown (duplicate UTR +40, amount mismatch +25, etc.)
+- **Risk bands** — Low (0-19), Medium (20-49), High (50-79), Critical (80-100)
+- **Evidence page** — full investigation view with timeline, payment events, duplicate claims
+- **Risk queue** — approve/hold/dismiss with audit trail
+
+### AI Investigation
+- **Structured responses** — decision, risk level, confidence, evidence citations
+- **Safety boundary** — AI is read-only, cannot approve/refund/delete
+- **Rule-based fallback** — works when Groq is unavailable
+- **Evidence citations** — every conclusion links to a specific database record
+
+### Google Form Integration
+- **Any form structure** — AI analyzes the form and auto-maps fields
+- **Auto-generated Apps Script** — custom-tailored to the form's field order
+- **Google Forms API** — reads org-restricted forms via OAuth access token
+- **Category-based pricing** — "Student" = ₹500, "Teacher" = ₹1000, etc.
+
+### Security
+- **Mandatory webhook verification** — unsigned webhooks are rejected when secret exists
+- **Backend approval checks** — cannot approve refunded/duplicate/checked-in registrations
+- **Rate limiting** — intake endpoint protected (60 req/min per token)
+- **Collision-safe registration IDs** — crypto random suffix prevents duplicates
+- **Role-based access** — owner/editor/viewer permissions enforced on server
+- **Event-level isolation** — users can only access their own or shared events
+
+### Operational
+- **Pagination** — supports page/pageSize/sort/filter on registrations
+- **Health monitoring** — global + per-event health (Razorpay, DB, last payment, data age)
+- **Improved reconciliation** — expected vs captured vs refunded vs failed, estimated fees clearly labeled
+- **Share access** — invite collaborators by email with viewer/editor roles
+- **Edit/delete events** — with confirmation and cascade deletion
+- **Audit log** — every action recorded with actor, role, reason, timestamp
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 19, Vite, Single-file SPA |
+| Backend | Express.js, Node.js |
+| Database | MongoDB Atlas (Mongoose) |
+| Payments | Razorpay Payment Links API |
+| AI | Groq SDK (openai/gpt-oss-120b) |
+| Auth | Google Sign-In (OAuth2 + ID Token) |
+| Forms | Google Forms API + Apps Script |
+
+---
+
+## Setup
+
+### Prerequisites
+- Node.js 20+
+- MongoDB Atlas account
+- Google Cloud Console project (OAuth client + Forms API enabled)
+- Razorpay account (each organizer sets up their own)
+- Groq API key (for AI features)
+
+### Environment Variables
+
+```
+PORT=3001
+CLIENT_ORIGIN=https://your-deployed-url.com
+JWT_SECRET=your-secret
+MONGODB_URI=mongodb+srv://...
+GROQ_API_KEY=gsk_...
+GOOGLE_CLIENT_ID=...apps.googleusercontent.com
+```
+
+### Local Development
+
+```bash
+cd server && npm install
+cd ../client && npm install
+# Terminal 1: npm run dev (in /server)
+# Terminal 2: npm run dev (in /client)
+```
+
+### Deploy (Render)
+
+- Build command: `cd server && npm install && cd ../client && npm install && npm run build`
+- Start command: `node server/src/index.js`
+- Add environment variables in Render dashboard
+
+---
+
+## API Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | /api/auth/google | No | Google OAuth sign-in |
+| GET | /api/auth/me | Yes | Get current user |
+| POST | /api/events | Yes | Create event |
+| GET | /api/events | Yes | List user's events + shared |
+| PUT | /api/events/:id | Yes | Update event |
+| DELETE | /api/events/:id | Yes | Delete event + all data |
+| POST | /api/events/:id/share | Yes | Share event access |
+| DELETE | /api/events/:id/share/:email | Yes | Remove access |
+| POST | /api/intake/:token | No | Google Form intake (rate-limited) |
+| GET | /api/events/:id/registrations | Yes | List registrations (paginated) |
+| POST | /api/events/:id/registrations | Yes | Manual registration |
+| GET | /api/events/:id/registrations/:regId/evidence | Yes | Full evidence page |
+| POST | /api/events/:id/registrations/:regId/approve | Yes | Approve entry (with checks) |
+| POST | /api/events/:id/registrations/:regId/hold | Yes | Hold entry |
+| GET | /api/events/:id/risk-queue | Yes | Get open risk cases |
+| POST | /api/events/:id/risk-queue/:riskId/resolve | Yes | Resolve risk case |
+| POST | /api/events/:id/risk-queue/:riskId/dismiss | Yes | Dismiss risk case |
+| POST | /api/events/:id/ai/investigate | Yes | AI investigation |
+| GET | /api/events/:id/reconciliation | Yes | Financial reconciliation |
+| GET | /api/events/:id/metrics | Yes | Dashboard metrics |
+| GET | /api/events/:id/health | Yes | Event health status |
+| POST | /api/events/:id/analyze-form | Yes | AI Google Form analysis |
+| POST | /api/events/:id/verify-setup | Yes | Verify full pipeline |
+| POST | /api/webhooks/razorpay | No | Razorpay webhook receiver |
+| GET | /api/health | No | System health |
+
+---
+
+## Known Limitations
+
+- No real-time WebSocket updates (polling-based refresh)
+- No offline entry mode
+- No PDF export
+- No background job processing (synchronous webhook handling)
+- Google Forms API requires form to be accessible (or OAuth scope granted)
+- Free Render tier has cold-start delay (~50s after inactivity)
+
+---
 
 ## License
 
-MIT
+Private — built for VIBEATHON 2026
