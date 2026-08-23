@@ -90,6 +90,7 @@ function Landing({ onSignIn }) {
 function GoogleSignIn({ onAuth, onBack }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pendingCredential, setPendingCredential] = useState("");
   const btnRef = React.useRef(null);
 
   useEffect(() => {
@@ -107,7 +108,8 @@ function GoogleSignIn({ onAuth, onBack }) {
           try {
             // First get the ID token for auth
             const credential = response.credential;
-            // Now request an access token with Forms scope
+            setPendingCredential(credential);
+            // Request the Forms permission while the credential is fresh.
             await requestAccessToken(credential);
           } catch (e) {
             setError(e.message || "Google sign-in failed");
@@ -131,8 +133,7 @@ function GoogleSignIn({ onAuth, onBack }) {
   const requestAccessToken = (idCredential) => {
     return new Promise((resolve, reject) => {
       if (!window.google?.accounts?.oauth2) {
-        // Fallback: just use ID token if oauth2 not available
-        onAuth(idCredential, null).then(resolve).catch(reject);
+        reject(new Error("Google Forms permission is unavailable in this browser. Please enable popups and try again."));
         return;
       }
       const tokenClient = window.google.accounts.oauth2.initTokenClient({
@@ -141,9 +142,8 @@ function GoogleSignIn({ onAuth, onBack }) {
         prompt: "consent",
         callback: async (tokenResponse) => {
           if (tokenResponse.error) {
-            // If user denies scope, still authenticate with ID token only
-            try { await onAuth(idCredential, null); resolve(); } catch (e) { reject(e); }
-            return;
+              reject(new Error("Google Forms permission was not granted. Please approve the permission request to import this form."));
+              return;
           }
           try {
             await onAuth(idCredential, tokenResponse.access_token);
@@ -151,8 +151,7 @@ function GoogleSignIn({ onAuth, onBack }) {
           } catch (e) { reject(e); }
         },
         error_callback: () => {
-          // Fallback: authenticate without Forms access
-          onAuth(idCredential, null).then(resolve).catch(reject);
+          reject(new Error("The Google permission window was blocked. Enable popups for this preview, then click Grant Google Forms access."));
         }
       });
       tokenClient.requestAccessToken();
@@ -167,8 +166,13 @@ function GoogleSignIn({ onAuth, onBack }) {
       <div ref={btnRef} />
       {busy && <p className="loading-text">Signing you in...</p>}
     </div>
+    {pendingCredential && !busy && <button className="btn-primary btn-full grant-forms-btn" onClick={async () => {
+      setBusy(true); setError("");
+      try { await requestAccessToken(pendingCredential); } catch (e) { setError(e.message || "Google Forms permission failed"); }
+      setBusy(false);
+    }}>Grant Google Forms access</button>}
     {error && <div className="err">{error}</div>}
-    <p className="auth-note">Sign in with your Google account to create and manage events. No password needed.</p>
+    <p className="auth-note">Sign in with Google and approve Forms access so EventPay can read restricted form structure. No password needed.</p>
   </div></div>;
 }
 
