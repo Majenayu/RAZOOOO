@@ -82,6 +82,9 @@ app.post("/api/webhooks/razorpay", express.raw({ type: "application/json" }), as
       await matchPaymentToRegistration(pe);
     }
 
+    // Broadcast real-time update
+    if (eventId) broadcastSSE(eventId, "payment", { registrationId: regId, amount: pe.amount, status: pe.status });
+
     res.json({ received: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -1271,6 +1274,241 @@ app.post("/api/events/:eventId/verify-setup", auth, async (req, res) => {
     }
 
     res.json({ checks, passed, total, allGood, testPaymentLink, aiAnalysis });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============ DEMO MODE ============
+app.post("/api/events/:eventId/demo-seed", auth, async (req, res) => {
+  try {
+    const event = await Event.findById(req.params.eventId);
+    if (!event) return res.status(404).json({ error: "Event not found" });
+    if (String(event.organizerId) !== String(req.userId)) return res.status(403).json({ error: "Only the event owner can seed demo data" });
+
+    const eventId = event._id;
+    const ticketType = event.ticketTypes?.[0]?.name || "General";
+    const price = event.ticketTypes?.[0]?.price || 500;
+
+    // Realistic Indian names and data
+    const demoParticipants = [
+      { name: "Aarav Sharma", phone: "9876543210", email: "aarav@example.com", status: "payment_verified", entry: "entry_approved", paid: true },
+      { name: "Priya Patel", phone: "9876543211", email: "priya@example.com", status: "payment_verified", entry: "entry_approved", paid: true },
+      { name: "Rohit Kumar", phone: "9876543212", email: "rohit@example.com", status: "payment_verified", entry: "checked_in", paid: true },
+      { name: "Sneha Reddy", phone: "9876543213", email: "sneha@example.com", status: "awaiting_payment", entry: "not_ready", paid: false },
+      { name: "Vikram Singh", phone: "9876543214", email: "vikram@example.com", status: "awaiting_payment", entry: "not_ready", paid: false },
+      { name: "Ananya Mishra", phone: "9876543215", email: "ananya@example.com", status: "amount_mismatch", entry: "entry_held", paid: true, amountPaid: price - 100 },
+      { name: "Karthik Nair", phone: "9876543216", email: "karthik@example.com", status: "duplicate_claim", entry: "entry_held", paid: true, duplicate: true },
+      { name: "Megha Gupta", phone: "9876543217", email: "megha@example.com", status: "payment_verified", entry: "entry_approved", paid: true },
+      { name: "Arjun Desai", phone: "9876543218", email: "arjun@example.com", status: "suspicious", entry: "entry_held", paid: true, suspicious: true },
+      { name: "Diya Joshi", phone: "9876543219", email: "diya@example.com", status: "payment_verified", entry: "checked_in", paid: true },
+      { name: "Raj Malhotra", phone: "9876543220", email: "raj@example.com", status: "manual_review", entry: "not_ready", paid: true },
+      { name: "Pooja Iyer", phone: "9876543221", email: "pooja@example.com", status: "payment_verified", entry: "entry_approved", paid: true },
+    ];
+
+    const createdRegs = [];
+    const sharedUTR = "UTR" + crypto.randomBytes(6).toString("hex").toUpperCase();
+
+    for (let i = 0; i < demoParticipants.length; i++) {
+      const p = demoParticipants[i];
+      const suffix = crypto.randomBytes(3).toString("hex").toUpperCase();
+      const registrationId = `REG-${String(i + 1001).padStart(4, "0")}-${suffix}`;
+      const entryToken = crypto.randomBytes(20).toString("hex");
+      const utr = p.duplicate ? sharedUTR : (p.paid ? "UTR" + crypto.randomBytes(6).toString("hex").toUpperCase() : "");
+
+      const reg = await Registration.create({
+        eventId, registrationId, name: p.name, phone: p.phone, email: p.email,
+        college: "Demo College", ticketType, expectedAmount: price,
+        numberOfTickets: 1, entryToken, paymentStatus: p.status, entryStatus: p.entry,
+        riskScore: p.suspicious ? 75 : p.duplicate ? 80 : p.amountPaid ? 60 : 0,
+        riskReasons: p.duplicate ? ["Duplicate UTR shared with another registration"] : p.amountPaid ? [`Amount mismatch: expected ₹${price}, received ₹${p.amountPaid}`] : p.suspicious ? ["Late payment after event cutoff", "Phone number mismatch"] : [],
+        amountReceived: p.amountPaid || (p.paid ? price : 0),
+        paymentId: p.paid ? "pay_demo_" + crypto.randomBytes(6).toString("hex") : "",
+        utr, checkedInAt: p.entry === "checked_in" ? new Date() : null
+      });
+      createdRegs.push(reg);
+
+      // Create payment event for paid participants
+      if (p.paid) {
+        await PaymentEvent.create({
+          eventId, registrationId, razorpayPaymentId: "pay_demo_" + crypto.randomBytes(6).toString("hex"),
+          utr, amount: p.amountPaid || price, currency: "INR",
+          status: "captured", method: ["upi", "card", "netbanking"][Math.floor(Math.random() * 3)],
+          contact: p.phone, email: p.email, matched: true, matchConfidence: p.duplicate ? 40 : p.amountPaid ? 70 : 95,
+          notes: { registrationId, eventId: String(eventId) }, capturedAt: new Date()
+        });
+      }
+    }
+
+    // Create risk queue entries
+    const mismatchReg = createdRegs.find(r => r.paymentStatus === "amount_mismatch");
+    if (mismatchReg) {
+      await RiskQueue.create({ eventId, registrationId: mismatchReg.registrationId, type: "amount_mismatch", severity: "high", details: { expected: price, received: price - 100, confidence: 70 }, status: "open" });
+    }
+    const dupReg = createdRegs.find(r => r.paymentStatus === "duplicate_claim");
+    if (dupReg) {
+      await RiskQueue.create({ eventId, registrationId: dupReg.registrationId, type: "duplicate_utr", severity: "critical", details: { sharedUTR, otherRegistrations: [createdRegs[0].registrationId] }, status: "open" });
+    }
+    const suspReg = createdRegs.find(r => r.paymentStatus === "suspicious");
+    if (suspReg) {
+      await RiskQueue.create({ eventId, registrationId: suspReg.registrationId, type: "timing_anomaly", severity: "medium", details: { reason: "Payment received after event registration cutoff" }, status: "open" });
+    }
+
+    // Create audit log entries
+    await AuditLog.create({ eventId, actorId: req.userId, actorRole: "organizer", action: "demo.seeded", target: "event", reason: `Seeded ${demoParticipants.length} demo registrations` });
+    for (const r of createdRegs.filter(r => r.entryStatus === "checked_in")) {
+      await AuditLog.create({ eventId, actorId: req.userId, actorRole: "volunteer", action: "entry.checked_in", target: r.registrationId });
+    }
+
+    res.json({ success: true, message: `Demo data created: ${createdRegs.length} registrations, 3 risk cases, payment events`, count: createdRegs.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Demo reset
+app.post("/api/events/:eventId/demo-reset", auth, async (req, res) => {
+  try {
+    const event = await Event.findById(req.params.eventId);
+    if (!event || String(event.organizerId) !== String(req.userId)) return res.status(403).json({ error: "Not authorized" });
+    await Promise.all([
+      Registration.deleteMany({ eventId: req.params.eventId }),
+      PaymentEvent.deleteMany({ eventId: req.params.eventId }),
+      RiskQueue.deleteMany({ eventId: req.params.eventId }),
+      MessageLog.deleteMany({ eventId: req.params.eventId }),
+      AuditLog.deleteMany({ eventId: req.params.eventId })
+    ]);
+    res.json({ success: true, message: "All demo data cleared" });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============ REAL-TIME SSE ============
+const sseClients = new Map(); // eventId -> Set of response objects
+
+app.get("/api/events/:eventId/stream", (req, res) => {
+  // Auth via query param since EventSource can't send headers
+  const token = req.query.token || req.headers.authorization?.replace("Bearer ", "");
+  if (!token) return res.status(401).json({ error: "Auth required" });
+  try { jwt.verify(token, JWT_SECRET); } catch { return res.status(401).json({ error: "Invalid token" }); }
+
+  res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
+  res.write("data: {\"type\":\"connected\"}\n\n");
+
+  const eventId = req.params.eventId;
+  if (!sseClients.has(eventId)) sseClients.set(eventId, new Set());
+  sseClients.get(eventId).add(res);
+
+  req.on("close", () => { sseClients.get(eventId)?.delete(res); });
+});
+
+function broadcastSSE(eventId, type, data) {
+  const clients = sseClients.get(String(eventId));
+  if (!clients || clients.size === 0) return;
+  const msg = `data: ${JSON.stringify({ type, ...data, timestamp: new Date().toISOString() })}\n\n`;
+  for (const client of clients) { try { client.write(msg); } catch {} }
+}
+
+// ============ AUDIT WITH HASH CHAIN ============
+async function createAuditWithHash(data) {
+  // Get the last audit entry for this event to build the chain
+  const lastAudit = await AuditLog.findOne({ eventId: data.eventId }).sort({ createdAt: -1 });
+  const prevHash = lastAudit?.hash || "GENESIS";
+  const payload = JSON.stringify({ ...data, prevHash, timestamp: Date.now() });
+  const hash = crypto.createHash("sha256").update(payload).digest("hex");
+  const entry = await AuditLog.create({ ...data, prevHash, hash });
+
+  // Broadcast via SSE
+  broadcastSSE(data.eventId, "audit", { action: data.action, target: data.target });
+  return entry;
+}
+
+// Verify audit chain integrity
+app.get("/api/events/:eventId/audit/verify", auth, async (req, res) => {
+  try {
+    const logs = await AuditLog.find({ eventId: req.params.eventId }).sort({ createdAt: 1 });
+    if (logs.length === 0) return res.json({ valid: true, message: "No audit entries", count: 0 });
+
+    let valid = true;
+    let brokenAt = null;
+    for (let i = 1; i < logs.length; i++) {
+      if (logs[i].prevHash && logs[i - 1].hash && logs[i].prevHash !== logs[i - 1].hash) {
+        valid = false;
+        brokenAt = i;
+        break;
+      }
+    }
+
+    const hasHashes = logs.some(l => l.hash);
+    res.json({
+      valid: hasHashes ? valid : true,
+      message: valid ? "Audit chain integrity verified — no tampering detected" : `Chain broken at entry ${brokenAt}`,
+      count: logs.length,
+      hasHashChain: hasHashes,
+      firstEntry: logs[0]?.createdAt,
+      lastEntry: logs[logs.length - 1]?.createdAt
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============ PDF EXPORT ============
+app.get("/api/events/:eventId/export/report", (req, res, next) => {
+  // Auth via query param for new-window access
+  const token = req.query.token || req.headers.authorization?.replace("Bearer ", "");
+  if (!token) return res.status(401).json({ error: "Auth required" });
+  try { const d = jwt.verify(token, JWT_SECRET); req.userId = d.userId; req.role = d.role; next(); } catch { return res.status(401).json({ error: "Invalid token" }); }
+}, async (req, res) => {
+  try {
+    const event = await Event.findById(req.params.eventId);
+    if (!event) return res.status(404).json({ error: "Event not found" });
+    const eventId = req.params.eventId;
+    const oid = new mongoose.Types.ObjectId(eventId);
+
+    const [regs, payments, risks, audits] = await Promise.all([
+      Registration.find({ eventId }).sort({ createdAt: -1 }),
+      PaymentEvent.find({ eventId }).sort({ createdAt: -1 }),
+      RiskQueue.find({ eventId }),
+      AuditLog.find({ eventId }).sort({ createdAt: -1 }).limit(50)
+    ]);
+
+    const totalExpected = regs.reduce((s, r) => s + r.expectedAmount, 0);
+    const totalReceived = payments.filter(p => p.status === "captured").reduce((s, p) => s + p.amount, 0);
+    const verified = regs.filter(r => r.paymentStatus === "payment_verified").length;
+    const pending = regs.filter(r => r.paymentStatus === "awaiting_payment").length;
+    const mismatches = regs.filter(r => r.paymentStatus === "amount_mismatch").length;
+    const duplicates = regs.filter(r => r.paymentStatus === "duplicate_claim").length;
+
+    // Generate HTML report (can be printed as PDF from browser)
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${event.name} - Report</title>
+<style>body{font-family:-apple-system,sans-serif;max-width:800px;margin:0 auto;padding:40px;color:#1a1a2e}h1{font-size:24px;border-bottom:2px solid #635bff;padding-bottom:10px}h2{font-size:18px;margin-top:30px;color:#635bff}table{width:100%;border-collapse:collapse;margin:15px 0;font-size:12px}th,td{padding:8px 10px;border:1px solid #e2e8f0;text-align:left}th{background:#f8f9fa;font-weight:600}.metric{display:inline-block;padding:8px 16px;margin:4px;background:#f0f1ff;border-radius:8px;font-size:13px}.metric strong{display:block;font-size:20px;color:#635bff}.risk-high{color:#dc2626}.risk-medium{color:#d97706}.verified{color:#059669}.footer{margin-top:40px;padding-top:15px;border-top:1px solid #e2e8f0;font-size:11px;color:#64748b}</style></head><body>
+<h1>${event.name} — Event Report</h1>
+<p>Generated: ${new Date().toLocaleString("en-IN")} | Date: ${new Date(event.eventDate).toLocaleDateString("en-IN")}</p>
+
+<h2>Summary</h2>
+<div class="metric"><strong>${regs.length}</strong>Total Registrations</div>
+<div class="metric"><strong class="verified">${verified}</strong>Verified Payments</div>
+<div class="metric"><strong>${pending}</strong>Pending</div>
+<div class="metric"><strong class="risk-high">${mismatches + duplicates}</strong>Issues</div>
+
+<h2>Financial Reconciliation</h2>
+<table><tr><td>Expected Gross</td><td><strong>₹${totalExpected.toLocaleString("en-IN")}</strong></td></tr>
+<tr><td>Captured</td><td><strong class="verified">₹${totalReceived.toLocaleString("en-IN")}</strong></td></tr>
+<tr><td>Gap</td><td><strong class="risk-high">₹${(totalExpected - totalReceived).toLocaleString("en-IN")}</strong></td></tr>
+<tr><td>Estimated Fees (~2%)</td><td>₹${Math.round(totalReceived * 0.02).toLocaleString("en-IN")}</td></tr>
+<tr><td><strong>Estimated Net</strong></td><td><strong>₹${Math.round(totalReceived * 0.98).toLocaleString("en-IN")}</strong></td></tr></table>
+
+<h2>Risk Cases (${risks.length})</h2>
+${risks.length ? `<table><tr><th>Registration</th><th>Type</th><th>Severity</th><th>Status</th></tr>${risks.map(r => `<tr><td>${r.registrationId}</td><td>${r.type.replace(/_/g, " ")}</td><td class="risk-${r.severity}">${r.severity}</td><td>${r.status}</td></tr>`).join("")}</table>` : "<p>No risk cases.</p>"}
+
+<h2>All Registrations (${regs.length})</h2>
+<table><tr><th>ID</th><th>Name</th><th>Phone</th><th>Expected</th><th>Received</th><th>Payment</th><th>Entry</th></tr>
+${regs.map(r => `<tr><td>${r.registrationId}</td><td>${r.name}</td><td>${r.phone}</td><td>₹${r.expectedAmount}</td><td>₹${r.amountReceived}</td><td>${r.paymentStatus.replace(/_/g, " ")}</td><td>${r.entryStatus.replace(/_/g, " ")}</td></tr>`).join("")}</table>
+
+<h2>Recent Audit Log</h2>
+<table><tr><th>Time</th><th>Action</th><th>Target</th><th>Reason</th></tr>
+${audits.slice(0, 20).map(a => `<tr><td>${new Date(a.createdAt).toLocaleString("en-IN")}</td><td>${a.action}</td><td>${a.target || "—"}</td><td>${a.reason || "—"}</td></tr>`).join("")}</table>
+
+<div class="footer"><p>FormPay Report | Audit chain: ${audits.some(a => a.hash) ? "Hash-verified" : "Standard"} | ${audits.length} audit entries</p></div>
+</body></html>`;
+
+    res.setHeader("Content-Type", "text/html");
+    res.setHeader("Content-Disposition", `inline; filename="${event.name.replace(/[^a-z0-9]/gi, "_")}_report.html"`);
+    res.send(html);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

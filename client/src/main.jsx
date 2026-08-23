@@ -600,9 +600,55 @@ function EventDashboard({ event, view, setView, onBack, notify, toast }) {
 // ============ COMMAND CENTER ============
 function CommandCenter({ metrics, regs, risks, event, notify, reload }) {
   const m = metrics;
+  const [demoLoading, setDemoLoading] = useState(false);
+  const [sseStatus, setSseStatus] = useState("disconnected");
+
+  // SSE real-time connection
+  useEffect(() => {
+    const token = getToken();
+    if (!token || !event?._id) return;
+    const es = new EventSource(`/api/events/${event._id}/stream?token=${token}`);
+    es.onopen = () => setSseStatus("live");
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type !== "connected") reload();
+      } catch {}
+    };
+    es.onerror = () => setSseStatus("reconnecting");
+    return () => es.close();
+  }, [event?._id]);
+
+  const seedDemo = async () => {
+    setDemoLoading(true);
+    try {
+      const result = await api(`/api/events/${event._id}/demo-seed`, { method: "POST" });
+      notify(result.message);
+      reload();
+    } catch (e) { notify(e.message); }
+    setDemoLoading(false);
+  };
+  const resetDemo = async () => {
+    if (!confirm("This will delete ALL registrations, payments, and risk data for this event. Continue?")) return;
+    try {
+      await api(`/api/events/${event._id}/demo-reset`, { method: "POST" });
+      notify("Demo data cleared");
+      reload();
+    } catch (e) { notify(e.message); }
+  };
+  const exportReport = () => { window.open(`/api/events/${event._id}/export/report?token=${getToken()}`, "_blank"); };
 
   return <div className="page">
-    <div className="page-head"><h1>Command Center</h1><button className="btn-ghost btn-sm" onClick={reload}>↻ Refresh</button></div>
+    <div className="page-head">
+      <h1>Command Center</h1>
+      <div className="cmd-actions">
+        <span className={`live-indicator ${sseStatus}`}>{sseStatus === "live" ? "● Live" : "○ " + sseStatus}</span>
+        <button className="btn-ghost btn-sm" onClick={reload}>↻ Refresh</button>
+        <button className="btn-ghost btn-sm" onClick={seedDemo} disabled={demoLoading}>{demoLoading ? "Seeding..." : "Demo Data"}</button>
+        <button className="btn-ghost btn-sm btn-danger" onClick={resetDemo}>Reset</button>
+        <button className="btn-ghost btn-sm" onClick={exportReport}>Export Report</button>
+      </div>
+    </div>
     <div className="metrics-grid">
       <div className="m-card"><span className="m-num">{m.totalRegs || 0}</span><span className="m-label">Total registrations</span></div>
       <div className="m-card green"><span className="m-num">{m.verified || 0}</span><span className="m-label">Payments verified</span></div>

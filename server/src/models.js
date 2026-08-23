@@ -121,7 +121,9 @@ const auditLogSchema = new mongoose.Schema({
   target: { type: String, default: "" },
   before: { type: mongoose.Schema.Types.Mixed, default: null },
   after: { type: mongoose.Schema.Types.Mixed, default: null },
-  reason: { type: String, default: "" }
+  reason: { type: String, default: "" },
+  prevHash: { type: String, default: "" },
+  hash: { type: String, default: "" }
 }, { timestamps: true });
 
 export const User = mongoose.model("User", userSchema);

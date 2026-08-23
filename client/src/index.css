@@ -550,3 +550,10 @@ tr.row-risk{background:#fff8f3}
 
 /* Reconciliation note */
 .recon-note{font-size:11px;color:var(--text2);font-style:italic;margin-top:10px;padding:8px 12px;background:var(--gray-light);border-radius:6px}
+
+/* Command Center actions */
+.cmd-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.live-indicator{font-size:10px;font-weight:700;padding:3px 8px;border-radius:5px}
+.live-indicator.live{color:var(--green);background:var(--green-light)}
+.live-indicator.disconnected{color:var(--gray)}
+.live-indicator.reconnecting{color:var(--yellow);background:var(--yellow-light)}
