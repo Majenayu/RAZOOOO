@@ -279,6 +279,15 @@ tr.row-risk{background:#fff7ed}
 .url-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light)}
 .sharing-steps{display:flex;flex-direction:column;gap:10px}
 .sharing-steps .step p strong{color:var(--accent)}
+
+/* Payment Setup */
+.razorpay-guide{margin-bottom:12px}
+.key-label{display:block;margin:12px 0 0;font-size:12px;font-weight:600;color:var(--text2)}
+.key-label input{display:block;width:100%;margin-top:5px;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;outline:none;font-family:monospace}
+.key-label input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light)}
+.key-safety-note{display:flex;gap:10px;align-items:flex-start;margin-top:14px;padding:12px;background:var(--green-light);border:1px solid var(--green);border-radius:8px}
+.key-safety-note span{font-size:16px}
+.key-safety-note p{font-size:11px;color:#065f46;line-height:1.5;margin:0}
 .field-mapping-list{display:flex;flex-direction:column;gap:6px;margin-top:8px}
 .fm-item{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--gray-light);border-radius:8px;font-size:12px}
 .fm-mapped{background:var(--accent-light)}

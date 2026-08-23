@@ -122,10 +122,10 @@ app.get("/api/auth/me", auth, async (req, res) => {
 // ============ EVENT ROUTES ============
 app.post("/api/events", auth, async (req, res) => {
   try {
-    const { name, venue, eventDate, ticketTypes, capacity, registrationEnd, paymentExpiryMinutes, entryRules } = req.body;
+    const { name, venue, eventDate, ticketTypes, capacity, registrationEnd, paymentExpiryMinutes, entryRules, razorpayKeyId, razorpayKeySecret } = req.body;
     if (!name || !eventDate) return res.status(400).json({ error: "Event name and date required" });
     const intakeToken = crypto.randomBytes(16).toString("hex");
-    const event = await Event.create({ organizerId: req.userId, name, venue: venue || "", eventDate, ticketTypes: ticketTypes || [], capacity: capacity || 1000, registrationEnd, paymentExpiryMinutes: paymentExpiryMinutes || 60, entryRules: entryRules || "", intakeToken });
+    const event = await Event.create({ organizerId: req.userId, name, venue: venue || "", eventDate, ticketTypes: ticketTypes || [], capacity: capacity || 1000, registrationEnd, paymentExpiryMinutes: paymentExpiryMinutes || 60, entryRules: entryRules || "", intakeToken, razorpayKeyId: razorpayKeyId || "", razorpayKeySecret: razorpayKeySecret || "" });
     await AuditLog.create({ eventId: event._id, actorId: req.userId, actorRole: req.role, action: "event.created", target: event._id });
     res.status(201).json(event);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -193,9 +193,11 @@ app.post("/api/events/:eventId/registrations", auth, async (req, res) => {
     const reg = await Registration.create({ eventId: event._id, registrationId, name, phone, email: email || "", college: college || "", ticketType, expectedAmount, numberOfTickets: numberOfTickets || 1, entryToken });
 
     // Create Razorpay payment link if configured
-    if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+    const rzpKeyId = event.razorpayKeyId;
+    const rzpKeySecret = event.razorpayKeySecret;
+    if (rzpKeyId && rzpKeySecret) {
       try {
-        const razorpay = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET });
+        const razorpay = new Razorpay({ key_id: rzpKeyId, key_secret: rzpKeySecret });
         const link = await razorpay.paymentLink.create({
           amount: expectedAmount * 100, currency: "INR",
           description: `${event.name} - ${ticketType}`,
@@ -241,10 +243,12 @@ app.post("/api/intake/:intakeToken", async (req, res) => {
     const entryToken = crypto.randomBytes(20).toString("hex");
     const reg = await Registration.create({ eventId: event._id, registrationId, name, phone, email: email || "", college: college || "", ticketType: ticket.name, expectedAmount, numberOfTickets: 1, entryToken });
 
-    // Create Razorpay payment link for the registration
-    if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+    // Create Razorpay payment link using event-level keys
+    const rzpKeyId = event.razorpayKeyId;
+    const rzpKeySecret = event.razorpayKeySecret;
+    if (rzpKeyId && rzpKeySecret) {
       try {
-        const razorpay = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET });
+        const razorpay = new Razorpay({ key_id: rzpKeyId, key_secret: rzpKeySecret });
         const link = await razorpay.paymentLink.create({
           amount: expectedAmount * 100, currency: "INR",
           description: `${event.name} - ${ticket.name}`,
@@ -752,27 +756,28 @@ app.post("/api/events/:eventId/verify-setup", auth, async (req, res) => {
       checks.push({ ok: false, label: "Intake URL", msg: "No intake token — Google Form cannot connect to this event" });
     }
 
-    // Check 5: Razorpay credentials
+    // Check 5: Razorpay credentials (event-level only)
+    const rzpKeyId = event.razorpayKeyId;
+    const rzpKeySecret = event.razorpayKeySecret;
     let razorpayOk = false;
-    if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+    if (rzpKeyId && rzpKeySecret) {
       try {
-        const razorpay = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET });
-        // Test API call - fetch account to verify credentials
+        const razorpay = new Razorpay({ key_id: rzpKeyId, key_secret: rzpKeySecret });
         await razorpay.payments.all({ count: 1 });
         razorpayOk = true;
-        checks.push({ ok: true, label: "Razorpay Connection", msg: "Razorpay API credentials are valid and connected" });
+        checks.push({ ok: true, label: "Razorpay Connection", msg: `Razorpay API credentials are valid (${rzpKeyId.substring(0, 12)}...)` });
       } catch (e) {
         checks.push({ ok: false, label: "Razorpay Connection", msg: `Razorpay credentials failed: ${e.message}` });
       }
     } else {
-      checks.push({ ok: false, label: "Razorpay Connection", msg: "Razorpay API keys not configured — payment links will NOT be generated" });
+      checks.push({ ok: false, label: "Razorpay Connection", msg: "No Razorpay API keys configured for this event — payment links will NOT be generated" });
     }
 
     // Check 6: Test payment link creation (real Razorpay test)
     let testPaymentLink = null;
     if (razorpayOk && event.ticketTypes?.length > 0) {
       try {
-        const razorpay = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET });
+        const razorpay = new Razorpay({ key_id: rzpKeyId, key_secret: rzpKeySecret });
         const testTicket = event.ticketTypes[0];
         const link = await razorpay.paymentLink.create({
           amount: testTicket.price * 100,
@@ -781,12 +786,10 @@ app.post("/api/events/:eventId/verify-setup", auth, async (req, res) => {
           customer: { name: "Test User", contact: "9999999999" },
           notify: { sms: false, email: false },
           notes: { test: "true", eventId: String(event._id) },
-          expire_by: Math.floor(Date.now() / 1000) + 300 // expires in 5 mins
+          expire_by: Math.floor(Date.now() / 1000) + 300
         });
         testPaymentLink = link.short_url;
-        checks.push({ ok: true, label: "Payment Link Generation", msg: `Razorpay payment link created successfully for "${testTicket.name}" (₹${testTicket.price}). Test link: ${link.short_url}` });
-
-        // Cancel the test link immediately
+        checks.push({ ok: true, label: "Payment Link Generation", msg: `Payment link created for "${testTicket.name}" (₹${testTicket.price}). Payments go to YOUR Razorpay account.` });
         try { await razorpay.paymentLink.cancel(link.id); } catch {}
       } catch (e) {
         checks.push({ ok: false, label: "Payment Link Generation", msg: `Failed to create payment link: ${e.message}` });
@@ -826,10 +829,11 @@ app.post("/api/events/:eventId/verify-setup", auth, async (req, res) => {
     }
 
     // Check 8: Webhook secret
-    if (process.env.RAZORPAY_WEBHOOK_SECRET) {
-      checks.push({ ok: true, label: "Webhook Verification", msg: "Razorpay webhook secret is configured — payments will be auto-verified" });
+    const webhookSecret = event.razorpayWebhookSecret;
+    if (webhookSecret) {
+      checks.push({ ok: true, label: "Webhook Verification", msg: "Webhook secret is configured — payments will be auto-verified" });
     } else {
-      checks.push({ ok: false, label: "Webhook Verification", msg: "No webhook secret — payments won't be auto-verified. Set RAZORPAY_WEBHOOK_SECRET in your environment." });
+      checks.push({ ok: true, label: "Webhook Verification", msg: "No webhook secret configured yet — you can add this later in event settings for auto-verification. Payments will still work via payment links." });
     }
 
     // Check 9: MongoDB connection

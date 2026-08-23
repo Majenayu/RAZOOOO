@@ -34,7 +34,10 @@ const eventSchema = new mongoose.Schema({
   entryRules: { type: String, default: "" },
   intakeToken: { type: String, default: "" },
   googleFormUrl: { type: String, default: "" },
-  fieldMapping: { type: mongoose.Schema.Types.Mixed, default: null }
+  fieldMapping: { type: mongoose.Schema.Types.Mixed, default: null },
+  razorpayKeyId: { type: String, default: "" },
+  razorpayKeySecret: { type: String, default: "" },
+  razorpayWebhookSecret: { type: String, default: "" }
 }, { timestamps: true });
 
 // ============ REGISTRATION ============

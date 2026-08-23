@@ -290,8 +290,8 @@ function EditEventModal({ event, onSave, onClose }) {
 
 function CreateEventBtn({ onCreated }) {
   const [show, setShow] = useState(false);
-  const [step, setStep] = useState(1); // 1: Event Details, 2: Google Form Setup, 3: AI Verification
-  const [form, setForm] = useState({ name: "", eventDate: "", categories: [{ name: "General", price: 500 }, { name: "Student", price: 500 }, { name: "Member", price: 300 }, { name: "Teacher", price: 1000 }] });
+  const [step, setStep] = useState(1); // 1: Event Details, 2: Payment Setup, 3: Google Form, 4: AI Verification
+  const [form, setForm] = useState({ name: "", eventDate: "", categories: [{ name: "General", price: 500 }, { name: "Student", price: 500 }, { name: "Member", price: 300 }, { name: "Teacher", price: 1000 }], razorpayKeyId: "", razorpayKeySecret: "" });
   const [busy, setBusy] = useState(false);
   const [createdEvent, setCreatedEvent] = useState(null);
   const [copied, setCopied] = useState("");
@@ -314,9 +314,9 @@ function CreateEventBtn({ onCreated }) {
     if (!form.name || !form.eventDate) return;
     setBusy(true);
     try {
-      const ev = await api("/api/events", { method: "POST", body: JSON.stringify({ name: form.name, eventDate: form.eventDate, ticketTypes: form.categories.filter(c => c.name.trim()).map(c => ({ name: c.name.trim(), price: Number(c.price), capacity: 9999 })) }) });
+      const ev = await api("/api/events", { method: "POST", body: JSON.stringify({ name: form.name, eventDate: form.eventDate, ticketTypes: form.categories.filter(c => c.name.trim()).map(c => ({ name: c.name.trim(), price: Number(c.price), capacity: 9999 })), razorpayKeyId: form.razorpayKeyId, razorpayKeySecret: form.razorpayKeySecret }) });
       setCreatedEvent(ev);
-      setStep(2);
+      setStep(3);
     } catch (e) { alert(e.message); }
     setBusy(false);
   };
@@ -356,19 +356,21 @@ function CreateEventBtn({ onCreated }) {
     setFormUrl("");
     setFormAnalysis(null);
     setAnalyzeError("");
-    setForm({ name: "", eventDate: "", categories: [{ name: "General", price: 500 }, { name: "Student", price: 500 }, { name: "Member", price: 300 }, { name: "Teacher", price: 1000 }] });
+    setForm({ name: "", eventDate: "", categories: [{ name: "General", price: 500 }, { name: "Student", price: 500 }, { name: "Member", price: 300 }, { name: "Teacher", price: 1000 }], razorpayKeyId: "", razorpayKeySecret: "" });
   };
 
   if (!show) return <button className="btn-primary" onClick={() => setShow(true)}>+ Create Event</button>;
 
-  return <Modal title={step === 1 ? "Create Event" : step === 2 ? "Connect Google Form" : "AI Setup Verification"} onClose={() => { setShow(false); setStep(1); setCreatedEvent(null); setAiCheck(null); }}>
+  return <Modal title={step === 1 ? "Create Event" : step === 2 ? "Payment Setup" : step === 3 ? "Connect Google Form" : "AI Setup Verification"} onClose={() => { setShow(false); setStep(1); setCreatedEvent(null); setAiCheck(null); }}>
     {/* Step indicator */}
     <div className="wizard-steps">
       <div className={`ws ${step >= 1 ? "ws-active" : ""}`}><span>1</span> Event</div>
       <div className="ws-line" />
-      <div className={`ws ${step >= 2 ? "ws-active" : ""}`}><span>2</span> Google Form</div>
+      <div className={`ws ${step >= 2 ? "ws-active" : ""}`}><span>2</span> Payment</div>
       <div className="ws-line" />
-      <div className={`ws ${step >= 3 ? "ws-active" : ""}`}><span>3</span> Verify</div>
+      <div className={`ws ${step >= 3 ? "ws-active" : ""}`}><span>3</span> Google Form</div>
+      <div className="ws-line" />
+      <div className={`ws ${step >= 4 ? "ws-active" : ""}`}><span>4</span> Verify</div>
     </div>
 
     {/* STEP 1: Event Details */}
@@ -388,12 +390,41 @@ function CreateEventBtn({ onCreated }) {
       </div>
       <div className="m-actions">
         <button type="button" className="btn-ghost" onClick={() => { setShow(false); setStep(1); }}>Cancel</button>
-        <button type="button" className="btn-primary" disabled={busy || !form.name || !form.eventDate} onClick={submitEvent}>{busy ? "Creating..." : "Create & Continue →"}</button>
+        <button type="button" className="btn-primary" disabled={!form.name || !form.eventDate} onClick={() => setStep(2)}>Next: Payment Setup →</button>
       </div>
     </div>}
 
-    {/* STEP 2: Google Form Setup */}
+    {/* STEP 2: Payment Setup */}
     {step === 2 && <div className="m-form wizard-form-step">
+      <div className="setup-section compact">
+        <h3>Connect your Razorpay account</h3>
+        <p className="section-hint">Payments from participants will go directly to YOUR Razorpay account. Your keys are stored securely and only used for this event.</p>
+        <div className="razorpay-guide">
+          <div className="steps-list compact-steps">
+            <div className="step"><span className="step-num">1</span><div><strong>Create a Razorpay account</strong><p>Go to <a href="https://dashboard.razorpay.com/signup" target="_blank" rel="noopener noreferrer">dashboard.razorpay.com</a> and sign up (free)</p></div></div>
+            <div className="step"><span className="step-num">2</span><div><strong>Get your API keys</strong><p>Dashboard → Settings → API Keys → Generate Key</p></div></div>
+            <div className="step"><span className="step-num">3</span><div><strong>Paste them below</strong><p>Key ID starts with <code>rzp_test_</code> (test mode) or <code>rzp_live_</code> (real payments)</p></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div className="setup-section compact">
+        <label className="key-label">Razorpay Key ID *<input value={form.razorpayKeyId} onChange={e => setForm({...form, razorpayKeyId: e.target.value})} placeholder="rzp_test_xxxxxxxxxxxxxx" /></label>
+        <label className="key-label">Razorpay Key Secret *<input type="password" value={form.razorpayKeySecret} onChange={e => setForm({...form, razorpayKeySecret: e.target.value})} placeholder="xxxxxxxxxxxxxxxxxxxxxxxx" /></label>
+        <div className="key-safety-note">
+          <span>🔒</span>
+          <p>Your keys are encrypted and stored securely. They are only used to generate payment links for this event. We never have access to your Razorpay balance or payouts.</p>
+        </div>
+      </div>
+
+      <div className="m-actions">
+        <button type="button" className="btn-ghost" onClick={() => setStep(1)}>← Back</button>
+        <button type="button" className="btn-primary" disabled={busy || !form.razorpayKeyId || !form.razorpayKeySecret} onClick={submitEvent}>{busy ? "Creating..." : "Create Event & Continue →"}</button>
+      </div>
+    </div>}
+
+    {/* STEP 3: Google Form Setup */}
+    {step === 3 && <div className="m-form wizard-form-step">
       <div className="setup-section compact">
         <h3>How to share your Google Form</h3>
         <div className="sharing-steps">
@@ -448,13 +479,13 @@ function CreateEventBtn({ onCreated }) {
       </>}
 
       <div className="m-actions">
-        <button type="button" className="btn-ghost" onClick={() => setStep(1)}>← Back</button>
-        <button type="button" className="btn-primary" disabled={!formAnalysis} onClick={() => { setStep(3); runAiCheck(); }}>Verify Setup →</button>
+        <button type="button" className="btn-ghost" onClick={() => setStep(2)}>← Back</button>
+        <button type="button" className="btn-primary" disabled={!formAnalysis} onClick={() => { setStep(4); runAiCheck(); }}>Verify Setup →</button>
       </div>
     </div>}
 
-    {/* STEP 3: AI Verification */}
-    {step === 3 && <div className="m-form wizard-form-step">
+    {/* STEP 4: AI Verification */}
+    {step === 4 && <div className="m-form wizard-form-step">
       <div className="ai-verify-section">
         <h3>Live Setup Verification</h3>
         <p className="section-hint">Testing your entire pipeline: Google Form intake → Razorpay payment link → verification...</p>
@@ -488,7 +519,7 @@ function CreateEventBtn({ onCreated }) {
       </div>
 
       <div className="m-actions">
-        <button type="button" className="btn-ghost" onClick={() => setStep(2)}>← Back</button>
+        <button type="button" className="btn-ghost" onClick={() => setStep(3)}>← Back</button>
         {aiCheck && !aiLoading && <button type="button" className="btn-ghost" onClick={runAiCheck}>Re-run checks</button>}
         <button type="button" className="btn-primary" onClick={finish}>Done — Go to Event →</button>
       </div>
