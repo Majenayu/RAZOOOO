@@ -482,3 +482,68 @@ tr.row-risk{background:#fff8f3}
   .modal{padding:20px}
   .ticket-row{flex-wrap:wrap}
 }
+
+/* Evidence Page */
+.evidence-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.ev-section{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;box-shadow:var(--shadow)}
+.ev-section h3{font-size:14px;font-weight:700;margin-bottom:10px}
+.ev-section.ev-full{grid-column:1/-1}
+.ev-section.ev-warning{border-left:4px solid var(--red);background:#fff5f5}
+.ev-details p{font-size:12px;margin:4px 0;color:var(--text2)}
+.ev-details p strong{color:var(--text)}
+.ev-details code{background:var(--gray-light);padding:1px 5px;border-radius:4px;font-size:10px}
+.risk-breakdown{display:flex;flex-direction:column;gap:6px}
+.rb-item{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--gray-light);border-radius:6px;font-size:12px}
+.rb-score{font-weight:800;color:var(--red);min-width:30px}
+.rb-item strong{font-size:12px}
+.rb-item small{color:var(--text2);margin-left:auto;font-size:10px}
+
+/* Timeline */
+.timeline{display:flex;flex-direction:column;gap:0;padding-left:12px;border-left:2px solid var(--border)}
+.tl-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;position:relative}
+.tl-time{font-size:10px;color:var(--text2);min-width:80px;font-weight:500}
+.tl-dot{width:10px;height:10px;min-width:10px;border-radius:50%;background:var(--accent);position:absolute;left:-18px;top:14px}
+.tl-content{font-size:12px}
+.tl-content strong{display:block;font-size:12px;margin-bottom:2px}
+.tl-content small{color:var(--text2)}
+
+/* AI Structured Results */
+.ai-safety-banner{background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:8px 12px;font-size:11px;color:#92400e;margin-bottom:12px;text-align:center;font-weight:500}
+.ai-result{margin-top:16px}
+.ai-structured{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;box-shadow:var(--shadow)}
+.ai-verdict-row{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.ai-decision{font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px}
+.ai-safe{background:var(--green-light);color:var(--green)}
+.ai-suspicious{background:var(--yellow-light);color:#92400e}
+.ai-fraud{background:var(--red-light);color:var(--red)}
+.ai-insufficient_data{background:var(--gray-light);color:var(--gray)}
+.ai-confidence{font-size:11px;font-weight:600;padding:3px 8px;border-radius:5px;background:var(--gray-light)}
+.conf-high{background:var(--green-light);color:var(--green)}
+.conf-medium{background:var(--yellow-light);color:#92400e}
+.conf-low{background:var(--red-light);color:var(--red)}
+.ai-summary{font-size:14px;margin-bottom:8px}
+.ai-explanation{font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:12px}
+.ai-evidence{margin-bottom:12px}
+.ai-evidence h4,.ai-missing h4{font-size:12px;font-weight:700;margin-bottom:6px}
+.ev-cite{display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--gray-light);border-radius:6px;margin-bottom:4px;font-size:11px}
+.ev-source{font-weight:700;color:var(--accent);min-width:70px}
+.ev-cite code{background:#e2e8f0;padding:1px 4px;border-radius:3px;font-size:10px}
+.ai-missing ul{padding-left:16px;font-size:11px;color:var(--text2)}
+.ai-actions-row{display:flex;flex-direction:column;gap:6px;padding-top:10px;border-top:1px solid var(--border)}
+.ai-recommend{font-size:12px;color:var(--green)}
+.ai-forbidden{font-size:12px;color:var(--red)}
+
+/* Differentiator Section */
+.differentiator{padding:50px 0;text-align:center}
+.differentiator h2{font-size:22px;font-weight:700;margin-bottom:20px}
+.diff-box{background:var(--card);border:2px solid var(--accent);border-radius:16px;padding:30px;max-width:700px;margin:0 auto;box-shadow:0 8px 30px rgba(99,91,255,.1)}
+.diff-main{font-size:15px;margin:8px 0;color:var(--text2)}
+.diff-main.accent{color:var(--accent);font-weight:700;font-size:16px}
+.diff-flow{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px;margin-top:18px;font-size:11px;font-weight:600;color:var(--accent)}
+.diff-flow span:nth-child(even){color:var(--text2)}
+
+@media(max-width:768px){
+  .evidence-grid{grid-template-columns:1fr}
+  .ai-verdict-row{flex-direction:column;align-items:flex-start}
+  .diff-flow{flex-direction:column}
+}

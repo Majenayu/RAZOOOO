@@ -82,6 +82,7 @@ function Landing({ onSignIn }) {
        <div className="f-card"><span className="feature-icon"><SentinelIcon type="entry" /></span><h3>QR Entry Pass</h3><p>Verified participants get QR codes. Volunteers scan at the gate.</p></div>
        <div className="f-card"><span className="feature-icon"><SentinelIcon type="ai" /></span><h3>AI Investigation</h3><p>Ask "Why is this payment pending?" and get evidence-backed answers</p></div>
     </div></section>
+    <section className="differentiator"><h2>Why FormPay is different</h2><div className="diff-box"><p className="diff-main">Razorpay confirms that a payment happened.</p><p className="diff-main accent">FormPay confirms <em>which participant</em> owns that payment and whether they can safely enter the event.</p><div className="diff-flow"><span>Google Form</span><span>→</span><span>Auto Payment Link</span><span>→</span><span>Cryptographic Verification</span><span>→</span><span>Fraud Detection</span><span>→</span><span>Safe Entry</span></div></div></section>
     <footer className="l-footer"><p>Built for India's high-volume events · Razorpay-powered · Real-time verification</p></footer>
   </div>;
 }
@@ -672,9 +673,34 @@ function Registrations({ event, regs, notify, reload }) {
 
 // ============ RISK QUEUE ============
 function RiskQueueView({ event, risks, regs, notify, reload }) {
-  const resolve = async (id, resolution) => {
-    try { /* For now just reload */ notify(`Risk ${resolution}`); reload(); } catch (e) { notify(e.message); }
+  const [evidenceData, setEvidenceData] = useState(null);
+  const [loadingEvidence, setLoadingEvidence] = useState(false);
+
+  const resolve = async (id, action) => {
+    try {
+      await api(`/api/events/${event._id}/risk-queue/${id}/resolve`, { method: "POST", body: JSON.stringify({ action, resolution: action }) });
+      notify(`Risk ${action === "approve" ? "approved" : "held"}`);
+      reload();
+    } catch (e) { notify(e.message); }
   };
+  const dismiss = async (id) => {
+    try {
+      await api(`/api/events/${event._id}/risk-queue/${id}/dismiss`, { method: "POST", body: JSON.stringify({ reason: "Dismissed by operator" }) });
+      notify("Risk dismissed");
+      reload();
+    } catch (e) { notify(e.message); }
+  };
+  const viewEvidence = async (regId) => {
+    setLoadingEvidence(true);
+    try {
+      const data = await api(`/api/events/${event._id}/registrations/${regId}/evidence`);
+      setEvidenceData(data);
+    } catch (e) { notify(e.message); }
+    setLoadingEvidence(false);
+  };
+
+  if (evidenceData) return <EvidencePage data={evidenceData} onBack={() => setEvidenceData(null)} />;
+
   return <div className="page">
     <div className="page-head"><h1>Risk Queue ({risks.length})</h1></div>
     {risks.length ? <div className="risk-list">{risks.map(r => {
@@ -682,9 +708,74 @@ function RiskQueueView({ event, risks, regs, notify, reload }) {
       return <div key={r._id} className={`risk-card risk-${r.severity}`}>
         <div className="rc-header"><span className={`badge badge-${r.severity}`}>{r.severity.toUpperCase()}</span><strong>{r.registrationId}</strong><small>{r.type.replace(/_/g, " ")}</small></div>
         <div className="rc-body">{reg && <p>{reg.name} · {reg.phone} · Expected: {money(reg.expectedAmount)} · Received: {money(reg.amountReceived)}</p>}{r.details?.reasons?.map((reason, i) => <p key={i} className="reason"><span className="reason-mark">!</span> {reason}</p>)}</div>
-        <div className="rc-actions"><button className="btn-primary btn-sm" onClick={() => resolve(r._id, "approved")}>Approve Entry</button><button className="btn-ghost btn-sm" onClick={() => resolve(r._id, "dismissed")}>Dismiss</button></div>
+        <div className="rc-actions">
+          <button className="btn-primary btn-sm" onClick={() => resolve(r._id, "approve")}>Approve Entry</button>
+          <button className="btn-ghost btn-sm" onClick={() => resolve(r._id, "hold")}>Hold</button>
+          <button className="btn-ghost btn-sm" onClick={() => dismiss(r._id)}>Dismiss</button>
+          <button className="btn-ghost btn-sm" onClick={() => viewEvidence(r.registrationId)}>Evidence</button>
+        </div>
       </div>;
     })}</div> : <p className="empty">No risk alerts. All clear!</p>}
+  </div>;
+}
+
+// ============ EVIDENCE PAGE ============
+function EvidencePage({ data, onBack }) {
+  const { registration: reg, payments, risks, timeline, riskBreakdown, riskBand, duplicateClaims } = data;
+  return <div className="page">
+    <div className="page-head"><button className="back-link" onClick={onBack}>← Back to Risk Queue</button><h1>Evidence: {reg.registrationId}</h1></div>
+
+    <div className="evidence-grid">
+      <div className="ev-section">
+        <h3>Participant</h3>
+        <div className="ev-details">
+          <p><strong>{reg.name}</strong></p>
+          <p>Phone: {reg.phone}</p>
+          <p>Email: {reg.email || "—"}</p>
+          <p>Ticket: {reg.ticketType}</p>
+          <p>College: {reg.college || "—"}</p>
+        </div>
+      </div>
+
+      <div className="ev-section">
+        <h3>Payment Status</h3>
+        <div className="ev-details">
+          <p>Expected: <strong>{money(reg.expectedAmount)}</strong></p>
+          <p>Received: <strong>{money(reg.amountReceived)}</strong></p>
+          <p>Status: <span className={`badge badge-${reg.paymentStatus === "payment_verified" ? "green" : "red"}`}>{reg.paymentStatus.replace(/_/g, " ")}</span></p>
+          <p>Entry: <span className={`badge badge-${reg.entryStatus === "entry_approved" ? "green" : "yellow"}`}>{reg.entryStatus.replace(/_/g, " ")}</span></p>
+          {reg.paymentId && <p>Payment ID: <code>{reg.paymentId}</code></p>}
+          {reg.utr && <p>UTR: <code>{reg.utr}</code></p>}
+          {reg.paymentLinkId && <p>Link ID: <code>{reg.paymentLinkId}</code></p>}
+        </div>
+      </div>
+
+      <div className="ev-section">
+        <h3>Risk Score: {reg.riskScore || 0} <span className={`badge badge-${riskBand === "critical" ? "red" : riskBand === "high" ? "orange" : riskBand === "medium" ? "yellow" : "green"}`}>{riskBand}</span></h3>
+        {riskBreakdown.length > 0 ? <div className="risk-breakdown">{riskBreakdown.map((r, i) => <div key={i} className="rb-item"><span className="rb-score">+{r.score}</span><strong>{r.signal}</strong><small>{r.detail}</small></div>)}</div> : <p className="empty">No risk signals</p>}
+      </div>
+
+      {duplicateClaims?.length > 0 && <div className="ev-section ev-warning">
+        <h3>Duplicate Claims ({duplicateClaims.length})</h3>
+        {duplicateClaims.map((d, i) => <p key={i}><strong>{d.registrationId}</strong> — {d.name} also claimed UTR: {d.utr}</p>)}
+      </div>}
+
+      <div className="ev-section ev-full">
+        <h3>Timeline</h3>
+        <div className="timeline">{timeline.map((t, i) => <div key={i} className="tl-item">
+          <span className="tl-time">{new Date(t.time).toLocaleString("en-IN", { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" })}</span>
+          <span className="tl-dot" />
+          <div className="tl-content"><strong>{t.event}</strong><small>{t.detail}</small></div>
+        </div>)}</div>
+      </div>
+
+      {payments.length > 0 && <div className="ev-section ev-full">
+        <h3>Payment Events ({payments.length})</h3>
+        <div className="table-wrap"><table><thead><tr><th>ID</th><th>Amount</th><th>Status</th><th>Method</th><th>UTR</th><th>Time</th></tr></thead><tbody>
+          {payments.map(p => <tr key={p._id}><td><code>{p.razorpayPaymentId?.slice(-8)}</code></td><td>{money(p.amount)}</td><td><span className={`badge badge-${p.status === "captured" ? "green" : "red"}`}>{p.status}</span></td><td>{p.method || "—"}</td><td>{p.utr || "—"}</td><td>{new Date(p.createdAt).toLocaleString("en-IN")}</td></tr>)}
+        </tbody></table></div>
+      </div>}
+    </div>
   </div>;
 }
 
@@ -758,22 +849,46 @@ function ShareAccess({ event, notify }) {
 
 // ============ AI INVESTIGATE ============
 function AIInvestigate({ event, notify }) {
-  const [question, setQuestion] = useState(""); const [answer, setAnswer] = useState(""); const [busy, setBusy] = useState(false);
-  const presets = ["Who can enter right now?", "Show all duplicate UTR claims", "Why is the settlement lower than expected?", "Which registrations have no verified payment?", "Give me today's event status in Hinglish"];
+  const [question, setQuestion] = useState(""); const [result, setResult] = useState(null); const [busy, setBusy] = useState(false);
+  const presets = ["Who can enter right now?", "Show all duplicate UTR claims", "Why is the settlement lower than expected?", "Which registrations have no verified payment?", "Are there any suspicious payments?", "Give me today's event status in Hinglish"];
 
   const ask = async (q) => {
     const query = q || question; if (!query.trim()) return;
-    setBusy(true); setAnswer("");
-    try { const d = await api(`/api/events/${event._id}/ai/investigate`, { method: "POST", body: JSON.stringify({ question: query }) }); setAnswer(d.answer); } catch (e) { setAnswer(`Error: ${e.message}`); }
+    setBusy(true); setResult(null);
+    try { const d = await api(`/api/events/${event._id}/ai/investigate`, { method: "POST", body: JSON.stringify({ question: query }) }); setResult(d); } catch (e) { setResult({ answer: `Error: ${e.message}` }); }
     setBusy(false);
   };
+
+  const s = result?.structured;
 
   return <div className="page">
     <div className="page-head"><h1>AI Investigation</h1></div>
     <div className="ai-box">
+      <div className="ai-safety-banner">AI is read-only. AI cannot approve entry, refund payments, or delete records. A human operator makes the final decision.</div>
       <div className="ai-presets">{presets.map(p => <button key={p} className="btn-ghost btn-sm" onClick={() => { setQuestion(p); ask(p); }}>{p}</button>)}</div>
-      <form onSubmit={e => { e.preventDefault(); ask(); }} className="ai-form"><input value={question} onChange={e => setQuestion(e.target.value)} placeholder="Ask anything about payments, registrations, or risks..." /><button className="btn-primary" disabled={busy}>{busy ? "Thinking..." : "Ask"}</button></form>
-      {answer && <div className="ai-answer"><pre>{answer}</pre></div>}
+      <form onSubmit={e => { e.preventDefault(); ask(); }} className="ai-form"><input value={question} onChange={e => setQuestion(e.target.value)} placeholder="Ask anything about payments, registrations, or risks..." /><button className="btn-primary" disabled={busy}>{busy ? "Investigating..." : "Investigate"}</button></form>
+      
+      {result && <div className="ai-result">
+        {s ? <div className="ai-structured">
+          <div className="ai-verdict-row">
+            <span className={`ai-decision ai-${s.decision}`}>{s.decision?.toUpperCase()}</span>
+            <span className={`badge badge-${s.riskLevel === "critical" ? "red" : s.riskLevel === "high" ? "orange" : s.riskLevel === "medium" ? "yellow" : "green"}`}>Risk: {s.riskLevel}</span>
+            <span className={`ai-confidence conf-${s.confidence}`}>Confidence: {s.confidence}</span>
+            {s.source === "rules" && <span className="badge badge-gray">Rule-based</span>}
+          </div>
+          <div className="ai-summary"><strong>{s.summary}</strong></div>
+          <p className="ai-explanation">{s.explanation}</p>
+          
+          {s.evidence?.length > 0 && <div className="ai-evidence"><h4>Evidence</h4>{s.evidence.map((e, i) => <div key={i} className="ev-cite"><span className="ev-source">{e.source}</span><code>{e.id}</code><span>{e.fact}</span></div>)}</div>}
+          
+          {s.missingInfo?.length > 0 && <div className="ai-missing"><h4>Missing Information</h4><ul>{s.missingInfo.map((m, i) => <li key={i}>{m}</li>)}</ul></div>}
+          
+          <div className="ai-actions-row">
+            {s.recommendedAction && <div className="ai-recommend"><strong>Recommended:</strong> {s.recommendedAction}</div>}
+            {s.forbiddenActions?.length > 0 && <div className="ai-forbidden"><strong>Do NOT:</strong> {s.forbiddenActions.join(", ")}</div>}
+          </div>
+        </div> : <div className="ai-answer"><pre>{result.answer}</pre></div>}
+      </div>}
     </div>
   </div>;
 }
