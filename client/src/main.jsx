@@ -38,6 +38,9 @@ function SentinelIcon({ type = "sentinel", size = 24 }) {
 const AuthCtx = createContext(null);
 const useAuth = () => useContext(AuthCtx);
 
+// ============ GOOGLE CLIENT ID ============
+const GOOGLE_CLIENT_ID = "538833309030-4gjr4t71dv9h8aififqjdl7umg6spc3g.apps.googleusercontent.com";
+
 // ============ APP ============
 function App() {
   const [user, setUser] = useState(null);
@@ -49,25 +52,28 @@ function App() {
     api("/api/auth/me").then(d => { setUser(d.user); setPage("events"); }).catch(() => clearToken()).finally(() => setLoading(false));
   }, []);
 
-  const login = async (email, password) => { const d = await api("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }); setToken(d.token); setUser(d.user); setPage("events"); };
-  const register = async (name, email, phone, password, role) => { const d = await api("/api/auth/register", { method: "POST", body: JSON.stringify({ name, email, phone, password, role }) }); setToken(d.token); setUser(d.user); setPage("events"); };
+  const handleGoogleAuth = async (credential, accessToken) => {
+    const d = await api("/api/auth/google", { method: "POST", body: JSON.stringify({ credential, accessToken }) });
+    setToken(d.token);
+    setUser(d.user);
+    setPage("events");
+  };
   const logout = () => { clearToken(); setUser(null); setPage("landing"); };
 
   if (loading) return <div className="load-screen"><div className="loader-icon">⚡</div><p>EventPay Sentinel</p></div>;
 
   return <AuthCtx.Provider value={{ user, logout }}>
-    {page === "landing" && <Landing onLogin={() => setPage("login")} onRegister={() => setPage("register")} />}
-    {page === "login" && <Login onLogin={login} onSwitch={() => setPage("register")} onBack={() => setPage("landing")} />}
-    {page === "register" && <Register onRegister={register} onSwitch={() => setPage("login")} onBack={() => setPage("landing")} />}
+    {page === "landing" && <Landing onSignIn={() => setPage("signin")} />}
+    {page === "signin" && <GoogleSignIn onAuth={handleGoogleAuth} onBack={() => setPage("landing")} />}
     {page === "events" && <EventsApp />}
   </AuthCtx.Provider>;
 }
 
 // ============ LANDING ============
-function Landing({ onLogin, onRegister }) {
+function Landing({ onSignIn }) {
   return <div className="landing">
-    <header className="l-header"><div className="l-brand"><span className="brand-mark"><SentinelIcon size={17} /></span> EventPay Sentinel</div><div className="l-nav"><button className="btn-ghost" onClick={onLogin}>Login</button><button className="btn-primary" onClick={onRegister}>Get Started</button></div></header>
-    <section className="hero"><h1>Real-time payment truth for mass events</h1><p>Connect registrations, Razorpay payments, fraud detection, and participant entry in one trusted command center. Never trust a screenshot again.</p><button className="btn-primary btn-lg" onClick={onRegister}>Create Your First Event →</button></section>
+    <header className="l-header"><div className="l-brand"><span className="brand-mark"><SentinelIcon size={17} /></span> EventPay Sentinel</div><div className="l-nav"><button className="btn-primary" onClick={onSignIn}>Sign in with Google</button></div></header>
+    <section className="hero"><h1>Real-time payment truth for mass events</h1><p>Connect registrations, Razorpay payments, fraud detection, and participant entry in one trusted command center. Never trust a screenshot again.</p><button className="btn-primary btn-lg" onClick={onSignIn}>Get Started with Google →</button></section>
     <section className="features"><h2>How it works</h2><div className="f-grid">
        <div className="f-card"><span className="feature-icon"><SentinelIcon type="intake" /></span><h3>Registration Intake</h3><p>Google Forms → auto-creates registrations with unique IDs and payment links</p></div>
        <div className="f-card"><span className="feature-icon"><SentinelIcon type="payment" /></span><h3>Razorpay Verification</h3><p>Webhooks verify payments cryptographically. No screenshots needed.</p></div>
@@ -80,18 +86,90 @@ function Landing({ onLogin, onRegister }) {
   </div>;
 }
 
-// ============ AUTH ============
-function Login({ onLogin, onSwitch, onBack }) {
-  const [email, setEmail] = useState(""); const [password, setPassword] = useState("");
-  const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
-  const submit = async e => { e.preventDefault(); setError(""); setBusy(true); try { await onLogin(email, password); } catch (e) { setError(e.message); } setBusy(false); };
-  return <div className="auth-page"><div className="auth-card"><button className="back-link" onClick={onBack}>← Back</button><h1>Login</h1><p>Access your event command center</p><form onSubmit={submit}><label>Email<input type="email" value={email} onChange={e=>setEmail(e.target.value)} required autoFocus /></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)} required /></label>{error && <div className="err">{error}</div>}<button className="btn-primary btn-full" disabled={busy}>{busy ? "..." : "Login"}</button></form><p className="switch">No account? <button onClick={onSwitch}>Register</button></p></div></div>;
-}
-function Register({ onRegister, onSwitch, onBack }) {
-  const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [phone, setPhone] = useState(""); const [password, setPassword] = useState(""); const [role, setRole] = useState("organizer");
-  const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
-  const submit = async e => { e.preventDefault(); setError(""); setBusy(true); try { await onRegister(name, email, phone, password, role); } catch (e) { setError(e.message); } setBusy(false); };
-  return <div className="auth-page"><div className="auth-card"><button className="back-link" onClick={onBack}>← Back</button><h1>Create Account</h1><p>Set up your event payment command center</p><form onSubmit={submit}><label>Full name<input value={name} onChange={e=>setName(e.target.value)} required autoFocus /></label><label>Email<input type="email" value={email} onChange={e=>setEmail(e.target.value)} required /></label><label>Phone<input value={phone} onChange={e=>setPhone(e.target.value)} /></label><label>Role<select value={role} onChange={e=>setRole(e.target.value)}><option value="organizer">Event Organizer</option><option value="volunteer">Volunteer / Gate</option><option value="finance">Finance Reviewer</option></select></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)} required minLength={6} /></label>{error && <div className="err">{error}</div>}<button className="btn-primary btn-full" disabled={busy}>{busy ? "..." : "Create Account"}</button></form><p className="switch">Have an account? <button onClick={onSwitch}>Login</button></p></div></div>;
+// ============ GOOGLE SIGN IN ============
+function GoogleSignIn({ onAuth, onBack }) {
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const btnRef = React.useRef(null);
+
+  useEffect(() => {
+    // Wait for Google GSI script to load
+    const initGoogle = () => {
+      if (!window.google?.accounts?.id) {
+        setTimeout(initGoogle, 200);
+        return;
+      }
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: async (response) => {
+          setBusy(true);
+          setError("");
+          try {
+            // First get the ID token for auth
+            const credential = response.credential;
+            // Now request an access token with Forms scope
+            await requestAccessToken(credential);
+          } catch (e) {
+            setError(e.message || "Google sign-in failed");
+          }
+          setBusy(false);
+        }
+      });
+      if (btnRef.current) {
+        window.google.accounts.id.renderButton(btnRef.current, {
+          theme: "outline",
+          size: "large",
+          width: 320,
+          text: "signin_with",
+          shape: "rectangular"
+        });
+      }
+    };
+    initGoogle();
+  }, []);
+
+  const requestAccessToken = (idCredential) => {
+    return new Promise((resolve, reject) => {
+      if (!window.google?.accounts?.oauth2) {
+        // Fallback: just use ID token if oauth2 not available
+        onAuth(idCredential, null).then(resolve).catch(reject);
+        return;
+      }
+      const tokenClient = window.google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: "https://www.googleapis.com/auth/forms.body.readonly",
+        prompt: "consent",
+        callback: async (tokenResponse) => {
+          if (tokenResponse.error) {
+            // If user denies scope, still authenticate with ID token only
+            try { await onAuth(idCredential, null); resolve(); } catch (e) { reject(e); }
+            return;
+          }
+          try {
+            await onAuth(idCredential, tokenResponse.access_token);
+            resolve();
+          } catch (e) { reject(e); }
+        },
+        error_callback: () => {
+          // Fallback: authenticate without Forms access
+          onAuth(idCredential, null).then(resolve).catch(reject);
+        }
+      });
+      tokenClient.requestAccessToken();
+    });
+  };
+
+  return <div className="auth-page"><div className="auth-card">
+    <button className="back-link" onClick={onBack}>← Back</button>
+    <h1>Sign In</h1>
+    <p>Access your event command center</p>
+    <div className="google-btn-wrap">
+      <div ref={btnRef} />
+      {busy && <p className="loading-text">Signing you in...</p>}
+    </div>
+    {error && <div className="err">{error}</div>}
+    <p className="auth-note">Sign in with your Google account to create and manage events. No password needed.</p>
+  </div></div>;
 }
 
 // ============ EVENTS APP ============
@@ -101,9 +179,29 @@ function EventsApp() {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [view, setView] = useState("dashboard");
   const [toast, setToast] = useState("");
+  const [editingEvent, setEditingEvent] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
   const notify = m => { setToast(m); setTimeout(() => setToast(""), 3000); };
 
   useEffect(() => { api("/api/events").then(setEvents).catch(e => notify(e.message)); }, []);
+
+  const deleteEvent = async (id) => {
+    try {
+      await api(`/api/events/${id}`, { method: "DELETE" });
+      setEvents(p => p.filter(e => e._id !== id));
+      setDeleteConfirm(null);
+      notify("Event deleted");
+    } catch (e) { notify(e.message); }
+  };
+
+  const updateEvent = async (id, data) => {
+    try {
+      const updated = await api(`/api/events/${id}`, { method: "PUT", body: JSON.stringify(data) });
+      setEvents(p => p.map(e => e._id === id ? updated : e));
+      setEditingEvent(null);
+      notify("Event updated!");
+    } catch (e) { notify(e.message); }
+  };
 
   if (selectedEvent) return <EventDashboard event={selectedEvent} view={view} setView={setView} onBack={() => { setSelectedEvent(null); setView("dashboard"); }} notify={notify} toast={toast} />;
 
@@ -111,37 +209,287 @@ function EventsApp() {
     <header className="app-header"><div className="app-brand"><span className="brand-mark"><SentinelIcon size={17} /></span> EventPay Sentinel</div><div className="app-user"><span>{user?.name}</span><small>{user?.role}</small><button className="btn-ghost btn-sm" onClick={logout}>Logout</button></div></header>
     <main className="events-page">
       <div className="page-head"><h1>Your Events</h1><CreateEventBtn onCreated={ev => { setEvents(p => [ev, ...p]); notify("Event created!"); }} /></div>
-      {events.length ? <div className="events-grid">{events.map(ev => <div key={ev._id} className="event-card" onClick={() => { setSelectedEvent(ev); setView("dashboard"); }}><h3>{ev.name}</h3><p>{ev.venue} · {new Date(ev.eventDate).toLocaleDateString("en-IN")}</p><span className={`badge badge-${ev.status}`}>{ev.status}</span></div>)}</div> : <p className="empty">No events yet. Create your first event to get started.</p>}
+      {events.length ? <div className="events-grid">{events.map(ev => <div key={ev._id} className="event-card">
+        <div className="ec-main" onClick={() => { setSelectedEvent(ev); setView("dashboard"); }}>
+          <h3>{ev.name}</h3>
+          <p>{new Date(ev.eventDate).toLocaleDateString("en-IN")}</p>
+          <div className="ec-cats">{ev.ticketTypes?.map((t, i) => <span key={i} className="cat-mini">{t.name} ₹{t.price}</span>)}</div>
+          <span className={`badge badge-${ev.status}`}>{ev.status}</span>
+        </div>
+        <div className="ec-actions">
+          <button className="btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); setEditingEvent(ev); }}>Edit</button>
+          <button className="btn-ghost btn-sm btn-danger" onClick={(e) => { e.stopPropagation(); setDeleteConfirm(ev); }}>Delete</button>
+        </div>
+      </div>)}</div> : <p className="empty">No events yet. Create your first event to get started.</p>}
     </main>
     {toast && <div className="toast">{toast}</div>}
+
+    {/* Edit Event Modal */}
+    {editingEvent && <EditEventModal event={editingEvent} onSave={updateEvent} onClose={() => setEditingEvent(null)} />}
+
+    {/* Delete Confirmation */}
+    {deleteConfirm && <Modal title="Delete Event" onClose={() => setDeleteConfirm(null)}>
+      <div className="delete-confirm">
+        <p>Are you sure you want to delete <strong>"{deleteConfirm.name}"</strong>?</p>
+        <p className="delete-warning">This will permanently delete all registrations, payments, risk queue items, messages, and audit logs associated with this event. This cannot be undone.</p>
+        <div className="m-actions">
+          <button className="btn-ghost" onClick={() => setDeleteConfirm(null)}>Cancel</button>
+          <button className="btn-danger-fill" onClick={() => deleteEvent(deleteConfirm._id)}>Yes, Delete Event</button>
+        </div>
+      </div>
+    </Modal>}
   </div>;
+}
+
+// ============ EDIT EVENT MODAL ============
+function EditEventModal({ event, onSave, onClose }) {
+  const [form, setForm] = useState({
+    name: event.name || "",
+    eventDate: event.eventDate ? new Date(event.eventDate).toISOString().split("T")[0] : "",
+    categories: event.ticketTypes?.map(t => ({ name: t.name, price: t.price })) || [{ name: "General", price: 500 }]
+  });
+  const [busy, setBusy] = useState(false);
+
+  const addCategory = () => setForm(f => ({ ...f, categories: [...f.categories, { name: "", price: 0 }] }));
+  const updateCategory = (i, k, v) => setForm(f => ({ ...f, categories: f.categories.map((c, idx) => idx === i ? { ...c, [k]: v } : c) }));
+  const removeCategory = (i) => { if (form.categories[i].name === "General") return; setForm(f => ({ ...f, categories: f.categories.filter((_, idx) => idx !== i) })); };
+
+  const submit = async (e) => {
+    e.preventDefault(); setBusy(true);
+    await onSave(event._id, {
+      name: form.name,
+      eventDate: form.eventDate,
+      ticketTypes: form.categories.filter(c => c.name.trim()).map(c => ({ name: c.name.trim(), price: Number(c.price), capacity: 9999 }))
+    });
+    setBusy(false);
+  };
+
+  return <Modal title="Edit Event" onClose={onClose}><form onSubmit={submit} className="m-form">
+    <label>Event name *<input value={form.name} onChange={e => setForm({...form, name: e.target.value})} required /></label>
+    <label>Event date *<input type="date" value={form.eventDate} onChange={e => setForm({...form, eventDate: e.target.value})} required /></label>
+    <div className="tickets-section">
+      <strong>Pricing Categories</strong>
+      <div className="naming-warning">Changing category names? Make sure your Google Form dropdown options still match exactly.</div>
+      {form.categories.map((c, i) => <div key={i} className="ticket-row">
+        <input placeholder="Category name" value={c.name} onChange={e => updateCategory(i, "name", e.target.value)} disabled={c.name === "General" && i === 0} />
+        <input type="number" placeholder="₹ Price" value={c.price} onChange={e => updateCategory(i, "price", e.target.value)} />
+        <button type="button" className="btn-sm btn-ghost" onClick={() => removeCategory(i)} disabled={c.name === "General" && i === 0}>✕</button>
+      </div>)}
+      <button type="button" className="btn-ghost btn-sm" onClick={addCategory}>+ Add category</button>
+    </div>
+    <div className="m-actions">
+      <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+      <button className="btn-primary" disabled={busy}>{busy ? "Saving..." : "Save Changes"}</button>
+    </div>
+  </form></Modal>;
 }
 
 function CreateEventBtn({ onCreated }) {
   const [show, setShow] = useState(false);
-  const [form, setForm] = useState({ name: "", venue: "", eventDate: "", capacity: 1000, tickets: [{ name: "General", price: 499, capacity: 500 }] });
+  const [step, setStep] = useState(1); // 1: Event Details, 2: Google Form Setup, 3: AI Verification
+  const [form, setForm] = useState({ name: "", eventDate: "", categories: [{ name: "General", price: 500 }, { name: "Student", price: 500 }, { name: "Member", price: 300 }, { name: "Teacher", price: 1000 }] });
   const [busy, setBusy] = useState(false);
-  const addTicket = () => setForm(f => ({ ...f, tickets: [...f.tickets, { name: "", price: 0, capacity: 100 }] }));
-  const updateTicket = (i, k, v) => setForm(f => ({ ...f, tickets: f.tickets.map((t, idx) => idx === i ? { ...t, [k]: v } : t) }));
+  const [createdEvent, setCreatedEvent] = useState(null);
+  const [copied, setCopied] = useState("");
+  const [aiCheck, setAiCheck] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [formUrl, setFormUrl] = useState("");
+  const [formAnalysis, setFormAnalysis] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeError, setAnalyzeError] = useState("");
 
-  const submit = async e => {
-    e.preventDefault(); setBusy(true);
+  const addCategory = () => setForm(f => ({ ...f, categories: [...f.categories, { name: "", price: 0 }] }));
+  const updateCategory = (i, k, v) => setForm(f => ({ ...f, categories: f.categories.map((c, idx) => idx === i ? { ...c, [k]: v } : c) }));
+  const removeCategory = (i) => { if (form.categories[i].name === "General") return; setForm(f => ({ ...f, categories: f.categories.filter((_, idx) => idx !== i) })); };
+
+  const copyText = (text, label) => {
+    navigator.clipboard.writeText(text).then(() => { setCopied(label); setTimeout(() => setCopied(""), 2000); }).catch(() => {});
+  };
+
+  const submitEvent = async () => {
+    if (!form.name || !form.eventDate) return;
+    setBusy(true);
     try {
-      const ev = await api("/api/events", { method: "POST", body: JSON.stringify({ name: form.name, venue: form.venue, eventDate: form.eventDate, capacity: Number(form.capacity), ticketTypes: form.tickets.map(t => ({ name: t.name, price: Number(t.price), capacity: Number(t.capacity) })) }) });
-      onCreated(ev); setShow(false);
+      const ev = await api("/api/events", { method: "POST", body: JSON.stringify({ name: form.name, eventDate: form.eventDate, ticketTypes: form.categories.filter(c => c.name.trim()).map(c => ({ name: c.name.trim(), price: Number(c.price), capacity: 9999 })) }) });
+      setCreatedEvent(ev);
+      setStep(2);
     } catch (e) { alert(e.message); }
     setBusy(false);
   };
 
+  const analyzeForm = async () => {
+    if (!formUrl.trim()) { setAnalyzeError("Please paste your Google Form URL"); return; }
+    setAnalyzing(true);
+    setAnalyzeError("");
+    setFormAnalysis(null);
+    try {
+      const result = await api(`/api/events/${createdEvent._id}/analyze-form`, { method: "POST", body: JSON.stringify({ formUrl: formUrl.trim() }) });
+      setFormAnalysis(result);
+    } catch (e) {
+      setAnalyzeError(e.message);
+    }
+    setAnalyzing(false);
+  };
+
+  const runAiCheck = async () => {
+    setAiLoading(true);
+    setAiCheck(null);
+    try {
+      const result = await api(`/api/events/${createdEvent._id}/verify-setup`, { method: "POST" });
+      setAiCheck(result);
+    } catch (e) {
+      setAiCheck({ checks: [{ ok: false, label: "Verification Error", msg: e.message }], passed: 0, total: 1, allGood: false });
+    }
+    setAiLoading(false);
+  };
+
+  const finish = () => {
+    if (createdEvent) onCreated(createdEvent);
+    setShow(false);
+    setStep(1);
+    setCreatedEvent(null);
+    setAiCheck(null);
+    setFormUrl("");
+    setFormAnalysis(null);
+    setAnalyzeError("");
+    setForm({ name: "", eventDate: "", categories: [{ name: "General", price: 500 }, { name: "Student", price: 500 }, { name: "Member", price: 300 }, { name: "Teacher", price: 1000 }] });
+  };
+
   if (!show) return <button className="btn-primary" onClick={() => setShow(true)}>+ Create Event</button>;
-  return <Modal title="Create Event" onClose={() => setShow(false)}><form onSubmit={submit} className="m-form">
-    <label>Event name *<input value={form.name} onChange={e => setForm({...form, name: e.target.value})} required placeholder="e.g. RazorFest 2026" /></label>
-    <label>Venue<input value={form.venue} onChange={e => setForm({...form, venue: e.target.value})} placeholder="e.g. Pune College Ground" /></label>
-    <label>Event date *<input type="date" value={form.eventDate} onChange={e => setForm({...form, eventDate: e.target.value})} required /></label>
-    <label>Capacity<input type="number" value={form.capacity} onChange={e => setForm({...form, capacity: e.target.value})} /></label>
-    <div className="tickets-section"><strong>Ticket Types</strong>{form.tickets.map((t, i) => <div key={i} className="ticket-row"><input placeholder="Name" value={t.name} onChange={e => updateTicket(i, "name", e.target.value)} /><input type="number" placeholder="Price" value={t.price} onChange={e => updateTicket(i, "price", e.target.value)} /><input type="number" placeholder="Capacity" value={t.capacity} onChange={e => updateTicket(i, "capacity", e.target.value)} /></div>)}<button type="button" className="btn-ghost btn-sm" onClick={addTicket}>+ Add ticket type</button></div>
-    <div className="m-actions"><button type="button" className="btn-ghost" onClick={() => setShow(false)}>Cancel</button><button className="btn-primary" disabled={busy}>{busy ? "Creating..." : "Create Event"}</button></div>
-  </form></Modal>;
+
+  return <Modal title={step === 1 ? "Create Event" : step === 2 ? "Connect Google Form" : "AI Setup Verification"} onClose={() => { setShow(false); setStep(1); setCreatedEvent(null); setAiCheck(null); }}>
+    {/* Step indicator */}
+    <div className="wizard-steps">
+      <div className={`ws ${step >= 1 ? "ws-active" : ""}`}><span>1</span> Event</div>
+      <div className="ws-line" />
+      <div className={`ws ${step >= 2 ? "ws-active" : ""}`}><span>2</span> Google Form</div>
+      <div className="ws-line" />
+      <div className={`ws ${step >= 3 ? "ws-active" : ""}`}><span>3</span> Verify</div>
+    </div>
+
+    {/* STEP 1: Event Details */}
+    {step === 1 && <div className="m-form">
+      <label>Event name *<input value={form.name} onChange={e => setForm({...form, name: e.target.value})} required placeholder="e.g. College Fest 2026" /></label>
+      <label>Event date *<input type="date" value={form.eventDate} onChange={e => setForm({...form, eventDate: e.target.value})} required /></label>
+      <div className="tickets-section">
+        <strong>Pricing Categories</strong>
+        <div className="naming-warning">The category names here must <strong>exactly match</strong> the options in your Google Form's dropdown/radio field. For example, if your form has "Student" as an option, type "Student" here — not "student" or "Students".</div>
+        <p className="section-hint">If a participant doesn't select a category, "General" will be used as the default.</p>
+        {form.categories.map((c, i) => <div key={i} className="ticket-row">
+          <input placeholder="Category name" value={c.name} onChange={e => updateCategory(i, "name", e.target.value)} disabled={c.name === "General" && i === 0} />
+          <input type="number" placeholder="₹ Price" value={c.price} onChange={e => updateCategory(i, "price", e.target.value)} />
+          <button type="button" className="btn-sm btn-ghost" onClick={() => removeCategory(i)} disabled={c.name === "General" && i === 0} title={c.name === "General" ? "Default category cannot be removed" : "Remove"}>✕</button>
+        </div>)}
+        <button type="button" className="btn-ghost btn-sm" onClick={addCategory}>+ Add category</button>
+      </div>
+      <div className="m-actions">
+        <button type="button" className="btn-ghost" onClick={() => { setShow(false); setStep(1); }}>Cancel</button>
+        <button type="button" className="btn-primary" disabled={busy || !form.name || !form.eventDate} onClick={submitEvent}>{busy ? "Creating..." : "Create & Continue →"}</button>
+      </div>
+    </div>}
+
+    {/* STEP 2: Google Form Setup */}
+    {step === 2 && <div className="m-form wizard-form-step">
+      <div className="setup-section compact">
+        <h3>How to share your Google Form</h3>
+        <div className="sharing-steps">
+          <div className="step"><span className="step-num">1</span><div><strong>Open your Google Form</strong><p>Go to the form you want to connect</p></div></div>
+          <div className="step"><span className="step-num">2</span><div><strong>Check Settings</strong><p>Click ⚙️ Settings → uncheck <strong>"Restrict to users in [your organization]"</strong> so the form is publicly accessible</p></div></div>
+          <div className="step"><span className="step-num">3</span><div><strong>Copy the link</strong><p>Click <strong>Send</strong> button → click the 🔗 link icon → copy the URL. Or just copy from the browser address bar (both work!)</p></div></div>
+        </div>
+      </div>
+
+      <div className="setup-section compact">
+        <h3>Paste your Google Form link</h3>
+        <p className="section-hint">We'll auto-detect your form fields using AI. Both /edit and respondent links work — we handle the conversion.</p>
+        <div className="form-url-input">
+          <input value={formUrl} onChange={e => setFormUrl(e.target.value)} placeholder="https://docs.google.com/forms/d/..." className="url-input" />
+          <button className="btn-primary" onClick={analyzeForm} disabled={analyzing}>{analyzing ? "Analyzing..." : "Analyze Form"}</button>
+        </div>
+        {analyzeError && <div className="err">{analyzeError}</div>}
+      </div>
+
+      {analyzing && <div className="setup-section compact"><div className="ai-loading"><div className="loader-icon small">⚡</div><p>AI is reading your Google Form and mapping fields...</p></div></div>}
+
+      {formAnalysis && <>
+        <div className="setup-section compact">
+          <h3>AI Field Mapping</h3>
+          <p className="section-hint">{formAnalysis.summary}</p>
+          <div className="field-mapping-list">
+            {formAnalysis.fieldMapping?.fields?.map((f, i) => <div key={i} className={`fm-item ${f.mappedTo !== "other" ? "fm-mapped" : ""}`}>
+              <span className="fm-idx">#{f.index}</span>
+              <span className="fm-label">{f.label}</span>
+              <span className={`fm-badge fm-${f.mappedTo}`}>{f.mappedTo === "other" ? "skipped" : `→ ${f.mappedTo}`}</span>
+              <span className={`fm-conf fm-conf-${f.confidence}`}>{f.confidence}</span>
+            </div>)}
+          </div>
+          {formAnalysis.warnings?.length > 0 && <div className="fm-warnings">{formAnalysis.warnings.map((w, i) => <p key={i} className="fm-warn-item">⚠ {w}</p>)}</div>}
+        </div>
+
+        <div className="setup-section compact">
+          <h3>Setup in 3 clicks:</h3>
+          <div className="steps-list compact-steps">
+            <div className="step"><span className="step-num">1</span><div><strong>Open Apps Script</strong><p>In your Google Form → ⋮ Menu → Script editor (or Extensions → Apps Script)</p></div></div>
+            <div className="step"><span className="step-num">2</span><div><strong>Paste the script below</strong><p>Delete any existing code, paste, and save (Ctrl+S)</p></div></div>
+            <div className="step"><span className="step-num">3</span><div><strong>Run setupTrigger once</strong><p>Select <code>setupTrigger</code> from dropdown → click ▶ Run → Authorize when prompted</p></div></div>
+          </div>
+        </div>
+
+        <div className="setup-section compact">
+          <div className="code-block">
+            <div className="code-header"><span>Auto-Generated Apps Script</span><button className="btn-primary btn-sm" onClick={() => copyText(formAnalysis.appsScript, "script")}>{copied === "script" ? "Copied!" : "Copy Script"}</button></div>
+            <pre>{formAnalysis.appsScript}</pre>
+          </div>
+        </div>
+      </>}
+
+      <div className="m-actions">
+        <button type="button" className="btn-ghost" onClick={() => setStep(1)}>← Back</button>
+        <button type="button" className="btn-primary" disabled={!formAnalysis} onClick={() => { setStep(3); runAiCheck(); }}>Verify Setup →</button>
+      </div>
+    </div>}
+
+    {/* STEP 3: AI Verification */}
+    {step === 3 && <div className="m-form wizard-form-step">
+      <div className="ai-verify-section">
+        <h3>Live Setup Verification</h3>
+        <p className="section-hint">Testing your entire pipeline: Google Form intake → Razorpay payment link → verification...</p>
+        
+        {aiLoading && <div className="ai-loading"><div className="loader-icon small">⚡</div><p>Running real tests against your setup...</p></div>}
+        
+        {aiCheck && <div className="ai-checks">
+          <div className="checks-summary">{aiCheck.passed}/{aiCheck.total} checks passed</div>
+          {aiCheck.checks.map((c, i) => <div key={i} className={`ai-check-item ${c.ok ? "check-pass" : "check-warn"}`}>
+            <span className="check-icon">{c.ok ? "✓" : "⚠"}</span>
+            <div className="check-content">
+              <strong className="check-label">{c.label}</strong>
+              <span>{c.msg}</span>
+            </div>
+          </div>)}
+          {aiCheck.testPaymentLink && <div className="test-link-box">
+            <strong>Test Payment Link Generated:</strong>
+            <a href={aiCheck.testPaymentLink} target="_blank" rel="noopener noreferrer">{aiCheck.testPaymentLink}</a>
+            <small>(This test link was auto-cancelled — no real payment will be taken)</small>
+          </div>}
+          <div className={`ai-verdict ${aiCheck.allGood ? "verdict-good" : "verdict-warn"}`}>
+            {aiCheck.allGood 
+              ? "All systems go! Your Google Form → Razorpay payment pipeline is working end-to-end." 
+              : "Some issues detected. Review the warnings above — you can still proceed but some features may not work."}
+          </div>
+          {aiCheck.aiAnalysis && <div className="ai-analysis-section">
+            <h4>AI Analysis</h4>
+            <pre className="ai-analysis-text">{aiCheck.aiAnalysis}</pre>
+          </div>}
+        </div>}
+      </div>
+
+      <div className="m-actions">
+        <button type="button" className="btn-ghost" onClick={() => setStep(2)}>← Back</button>
+        {aiCheck && !aiLoading && <button type="button" className="btn-ghost" onClick={runAiCheck}>Re-run checks</button>}
+        <button type="button" className="btn-primary" onClick={finish}>Done — Go to Event →</button>
+      </div>
+    </div>}
+  </Modal>;
 }
 
 // ============ EVENT DASHBOARD ============
@@ -212,10 +560,9 @@ function EventDashboard({ event, view, setView, onBack, notify, toast }) {
 // ============ COMMAND CENTER ============
 function CommandCenter({ metrics, regs, risks, event, notify, reload }) {
   const m = metrics;
-  const seedDemo = async () => { try { const d = await api(`/api/events/${event._id}/seed-demo`, { method: "POST" }); notify(d.message); reload(); } catch (e) { notify(e.message); } };
 
   return <div className="page">
-    <div className="page-head"><h1>Command Center</h1><button className="btn-ghost btn-sm" onClick={seedDemo}>Seed demo data</button><button className="btn-ghost btn-sm" onClick={reload}>↻ Refresh</button></div>
+    <div className="page-head"><h1>Command Center</h1><button className="btn-ghost btn-sm" onClick={reload}>↻ Refresh</button></div>
     <div className="metrics-grid">
       <div className="m-card"><span className="m-num">{m.totalRegs || 0}</span><span className="m-label">Total registrations</span></div>
       <div className="m-card green"><span className="m-num">{m.verified || 0}</span><span className="m-label">Payments verified</span></div>

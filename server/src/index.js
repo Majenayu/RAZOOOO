@@ -2,11 +2,11 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import mongoose from "mongoose";
-import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "node:crypto";
 import Groq from "groq-sdk";
 import Razorpay from "razorpay";
+import { OAuth2Client } from "google-auth-library";
 import { User, Event, Registration, PaymentEvent, RiskQueue, MessageLog, AuditLog } from "./models.js";
 
 const app = express();
@@ -65,38 +65,57 @@ function auth(req, res, next) {
 }
 
 // ============ AUTH ROUTES ============
-app.post("/api/auth/register", async (req, res) => {
-  try {
-    const { name, email, phone, password, role } = req.body;
-    if (!name || !email || !password) return res.status(400).json({ error: "Name, email, and password required" });
-    if (password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
-    const existing = await User.findOne({ email: email.toLowerCase() });
-    if (existing) return res.status(400).json({ error: "Email already registered" });
-    const hashed = await bcrypt.hash(password, 10);
-    const user = await User.create({ name, email: email.toLowerCase(), phone: phone || "", password: hashed, role: role || "organizer" });
-    const token = jwt.sign({ userId: user._id, role: user.role }, JWT_SECRET, { expiresIn: "30d" });
-    res.status(201).json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-app.post("/api/auth/login", async (req, res) => {
+app.post("/api/auth/google", async (req, res) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ error: "Email and password required" });
-    const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) return res.status(401).json({ error: "Invalid credentials" });
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) return res.status(401).json({ error: "Invalid credentials" });
+    const { credential, accessToken } = req.body;
+    if (!credential) return res.status(400).json({ error: "Google credential required" });
+
+    // Verify the Google ID token
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID
+    });
+    const payload = ticket.getPayload();
+    const { sub: googleId, email, name, picture } = payload;
+
+    if (!email) return res.status(400).json({ error: "Email not available from Google account" });
+
+    // Find existing user or create new one
+    let user = await User.findOne({ $or: [{ googleId }, { email: email.toLowerCase() }] });
+    if (user) {
+      // Update googleId and avatar if not set
+      if (!user.googleId) user.googleId = googleId;
+      if (!user.avatar) user.avatar = picture || "";
+      if (!user.name || user.name === email) user.name = name;
+      // Store access token for Google Forms API access
+      if (accessToken) user.googleAccessToken = accessToken;
+      await user.save();
+    } else {
+      user = await User.create({
+        name: name || email,
+        email: email.toLowerCase(),
+        googleId,
+        avatar: picture || "",
+        googleAccessToken: accessToken || "",
+        role: "organizer"
+      });
+    }
+
     const token = jwt.sign({ userId: user._id, role: user.role }, JWT_SECRET, { expiresIn: "30d" });
-    res.json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role, avatar: user.avatar } });
+  } catch (e) {
+    console.error("Google auth error:", e.message);
+    res.status(401).json({ error: "Google authentication failed" });
+  }
 });
 
 app.get("/api/auth/me", auth, async (req, res) => {
   try {
     const user = await User.findById(req.userId).select("-password");
     if (!user) return res.status(404).json({ error: "User not found" });
-    res.json({ user: { id: user._id, name: user.name, email: user.email, role: user.role } });
+    res.json({ user: { id: user._id, name: user.name, email: user.email, role: user.role, avatar: user.avatar } });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -132,6 +151,22 @@ app.put("/api/events/:id", auth, async (req, res) => {
     const event = await Event.findOneAndUpdate({ _id: req.params.id, organizerId: req.userId }, req.body, { new: true });
     if (!event) return res.status(404).json({ error: "Event not found" });
     res.json(event);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/api/events/:id", auth, async (req, res) => {
+  try {
+    const event = await Event.findOneAndDelete({ _id: req.params.id, organizerId: req.userId });
+    if (!event) return res.status(404).json({ error: "Event not found" });
+    // Cleanup associated data
+    await Promise.all([
+      Registration.deleteMany({ eventId: req.params.id }),
+      PaymentEvent.deleteMany({ eventId: req.params.id }),
+      RiskQueue.deleteMany({ eventId: req.params.id }),
+      MessageLog.deleteMany({ eventId: req.params.id }),
+      AuditLog.deleteMany({ eventId: req.params.id })
+    ]);
+    res.json({ success: true, message: "Event and all associated data deleted" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -187,18 +222,46 @@ app.post("/api/intake/:intakeToken", async (req, res) => {
   try {
     const event = await Event.findOne({ intakeToken: req.params.intakeToken });
     if (!event) return res.status(404).json({ error: "Invalid intake token" });
-    const { name, phone, email, college, ticketType, numberOfTickets } = req.body;
-    if (!name || !phone || !ticketType) return res.status(400).json({ error: "Name, phone, and ticket type required" });
-    const ticket = event.ticketTypes.find(t => t.name === ticketType);
-    if (!ticket) return res.status(400).json({ error: "Invalid ticket type" });
-    const expectedAmount = ticket.price * (numberOfTickets || 1);
+    const { name, phone, email, college, category, ticketType } = req.body;
+    if (!name || !phone) return res.status(400).json({ error: "Name and phone are required" });
+
+    // Support both 'category' (from Google Form) and 'ticketType' (legacy)
+    // Default to 'General' if no category is provided
+    const categoryName = category || ticketType || "General";
+
+    // Case-insensitive match against event pricing categories
+    const ticket = event.ticketTypes.find(t => t.name.toLowerCase().trim() === categoryName.toLowerCase().trim());
+    if (!ticket) return res.status(400).json({ error: `Invalid category "${categoryName}". Valid options: ${event.ticketTypes.map(t => t.name).join(", ")}` });
+
+    const expectedAmount = ticket.price;
     const count = await Registration.countDocuments({ eventId: event._id });
     const registrationId = `REG-${String(count + 1001).padStart(4, "0")}`;
     const dup = await Registration.findOne({ eventId: event._id, phone });
-    if (dup) return res.status(400).json({ error: "Already registered", registrationId: dup.registrationId });
+    if (dup) return res.status(400).json({ error: "Already registered", registrationId: dup.registrationId, paymentLinkUrl: dup.paymentLinkUrl });
     const entryToken = crypto.randomBytes(20).toString("hex");
-    const reg = await Registration.create({ eventId: event._id, registrationId, name, phone, email: email || "", college: college || "", ticketType, expectedAmount, numberOfTickets: numberOfTickets || 1, entryToken });
-    res.status(201).json({ registrationId: reg.registrationId, expectedAmount, paymentLinkUrl: reg.paymentLinkUrl });
+    const reg = await Registration.create({ eventId: event._id, registrationId, name, phone, email: email || "", college: college || "", ticketType: ticket.name, expectedAmount, numberOfTickets: 1, entryToken });
+
+    // Create Razorpay payment link for the registration
+    if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+      try {
+        const razorpay = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET });
+        const link = await razorpay.paymentLink.create({
+          amount: expectedAmount * 100, currency: "INR",
+          description: `${event.name} - ${ticket.name}`,
+          customer: { name, contact: phone, email: email || undefined },
+          notify: { sms: true, email: Boolean(email) },
+          notes: { registrationId, eventId: String(event._id) },
+          callback_url: process.env.CLIENT_ORIGIN || "http://localhost:5000",
+          expire_by: Math.floor(Date.now() / 1000) + (event.paymentExpiryMinutes || 60) * 60
+        });
+        reg.paymentLinkId = link.id;
+        reg.paymentLinkUrl = link.short_url;
+        reg.orderId = link.order_id || "";
+        await reg.save();
+      } catch (e) { console.error("Intake payment link creation failed:", e.message); }
+    }
+
+    res.status(201).json({ registrationId: reg.registrationId, expectedAmount, category: ticket.name, paymentLinkUrl: reg.paymentLinkUrl || "" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -346,7 +409,7 @@ app.post("/api/events/:eventId/ai/investigate", auth, async (req, res) => {
 
     const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
     const completion = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile", temperature: 0.2,
+      model: "openai/gpt-oss-120b", temperature: 0.2,
       messages: [
         { role: "system", content: `You are EventPay Sentinel AI — an investigation assistant for event payment verification. Answer questions using ONLY the provided data. Format: 1) Direct answer 2) Evidence 3) Risk level 4) Recommended action. If data is missing, say so. Support Hindi/Hinglish if asked. Never invent payment data.` },
         { role: "user", content: JSON.stringify({ question, metrics, registrations: regs.slice(0, 20), risks, payments: payments.slice(0, 15) }) }
@@ -364,42 +427,450 @@ app.get("/api/events/:eventId/audit", auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ============ SEED DEMO DATA ============
-app.post("/api/events/:eventId/seed-demo", auth, async (req, res) => {
+// ============ ANALYZE GOOGLE FORM ============
+app.post("/api/events/:eventId/analyze-form", auth, async (req, res) => {
+  try {
+    let { formUrl } = req.body;
+    if (!formUrl) return res.status(400).json({ error: "Google Form URL is required" });
+
+    // Validate it looks like a Google Form URL
+    if (!formUrl.includes("docs.google.com/forms")) {
+      return res.status(400).json({ error: "Invalid URL. Please provide a Google Forms link (docs.google.com/forms/...)" });
+    }
+
+    // Auto-convert /edit URL to /viewform (public URL)
+    // /edit requires login, /viewform is the public respondent view
+    if (formUrl.includes("/edit")) {
+      // Extract form ID from /edit URL: docs.google.com/forms/d/FORM_ID/edit
+      const idMatch = formUrl.match(/\/forms\/d\/([a-zA-Z0-9_-]+)/);
+      if (idMatch) {
+        formUrl = `https://docs.google.com/forms/d/${idMatch[1]}/viewform`;
+      }
+    }
+    // Also handle /d/e/ published URLs
+    if (!formUrl.includes("/viewform") && !formUrl.includes("/formResponse")) {
+      formUrl = formUrl.replace(/\/edit.*$/, "/viewform").replace(/\?.*$/, "");
+      if (!formUrl.endsWith("/viewform")) formUrl += "/viewform";
+    }
+
+    const event = await Event.findById(req.params.eventId);
+    if (!event) return res.status(404).json({ error: "Event not found" });
+
+    // Get user's Google access token for Forms API
+    const user = await User.findById(req.userId);
+    const googleToken = user?.googleAccessToken;
+
+    // Extract form ID from URL
+    let formId = "";
+    const formIdMatch = formUrl.match(/\/forms\/d\/([a-zA-Z0-9_-]+)/);
+    if (formIdMatch) formId = formIdMatch[1];
+    // Also handle /d/e/ published URLs
+    const publishedMatch = formUrl.match(/\/forms\/d\/e\/([a-zA-Z0-9_-]+)/);
+
+    let fieldLabels = [];
+    let formTitle = "";
+    let formItems = null; // structured items from API
+
+    // Strategy A: Use Google Forms API with user's access token (works for org-restricted forms)
+    if (googleToken && formId) {
+      try {
+        const apiUrl = `https://forms.googleapis.com/v1/forms/${formId}`;
+        const apiRes = await fetch(apiUrl, {
+          headers: { "Authorization": `Bearer ${googleToken}` }
+        });
+        if (apiRes.ok) {
+          const formData = await apiRes.json();
+          formTitle = formData.info?.title || "";
+          formItems = formData.items || [];
+          // Extract field labels from API response
+          for (const item of formItems) {
+            const title = item.title || "";
+            if (title) fieldLabels.push(title);
+          }
+        } else {
+          // Token might be expired or insufficient scope — fall through to HTML fetch
+          console.log("Forms API failed:", apiRes.status, "— falling back to HTML fetch");
+        }
+      } catch (e) {
+        console.log("Forms API error:", e.message, "— falling back to HTML fetch");
+      }
+    }
+
+    // Strategy B: Fall back to anonymous HTML fetch if API didn't work
+    if (fieldLabels.length === 0) {
+      let formHtml = "";
+      try {
+        const response = await fetch(formUrl, { 
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
+          redirect: "follow"
+        });
+        if (!response.ok) {
+          if (!googleToken) {
+            return res.status(400).json({ error: `Cannot access form (HTTP ${response.status}). The form appears to be restricted to your organization. Please sign out and sign back in — you'll be asked to grant Google Forms access permission, which lets EventPay read your form structure.` });
+          }
+          return res.status(400).json({ error: `Cannot access form (HTTP ${response.status}). Your Google Forms access token may have expired. Please sign out and sign back in to refresh permissions.` });
+        }
+        formHtml = await response.text();
+      } catch (e) {
+        return res.status(400).json({ error: `Cannot access form: ${e.message}` });
+      }
+
+      // Check if we got a login page
+      if (formHtml.includes("accounts.google.com/ServiceLogin") || formHtml.includes("identifier-shown")) {
+        if (!googleToken) {
+          return res.status(400).json({ error: "This form requires sign-in. Please sign out and sign back in — you'll be asked to grant Google Forms access permission." });
+        }
+        return res.status(400).json({ error: "Form access denied. Your token may have expired. Please sign out and sign back in." });
+      }
+
+      // Extract title from HTML
+      const titleMatch = formHtml.match(/<title>(.*?)<\/title>/);
+      if (titleMatch) formTitle = titleMatch[1].replace(" - Google Forms", "").trim();
+
+      // Extract from FB_PUBLIC_LOAD_DATA_
+      const dataMatch = formHtml.match(/FB_PUBLIC_LOAD_DATA_\s*=\s*([\s\S]*?);\s*<\/script>/);
+      if (dataMatch) {
+        try {
+          const rawData = dataMatch[1];
+          const questionRegex = /\[\d{9,},\s*"([^"]{2,150})"/g;
+          let match;
+          while ((match = questionRegex.exec(rawData)) !== null) {
+            const label = match[1].trim();
+            if (label.length >= 2 && !label.startsWith("http") && !label.includes("google.com")) {
+              fieldLabels.push(label);
+            }
+          }
+          if (fieldLabels.length === 0) {
+            const allStrings = rawData.match(/"([^"]{3,80})"/g) || [];
+            const seen = new Set();
+            const skipWords = ["http", "google", "gstatic", "font", "css", "script", "docs.google", "fbzx"];
+            for (const s of allStrings) {
+              const clean = s.replace(/"/g, "").trim();
+              if (clean.length < 3 || clean.length > 80) continue;
+              if (skipWords.some(sw => clean.toLowerCase().includes(sw))) continue;
+              if (clean.match(/^[0-9.]+$/) || clean.match(/^[a-f0-9]{20,}$/)) continue;
+              if (seen.has(clean.toLowerCase())) continue;
+              seen.add(clean.toLowerCase());
+              fieldLabels.push(clean);
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // Use Groq AI to analyze the form structure and map fields
+    if (!process.env.GROQ_API_KEY) {
+      return res.status(503).json({ error: "AI analysis unavailable — GROQ_API_KEY not configured" });
+    }
+
+    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+    const categories = event.ticketTypes?.map(t => t.name) || ["General"];
+
+    // Prepare context for AI — if we got structured items from API, use those
+    const formContext = formItems 
+      ? JSON.stringify(formItems.map((item, i) => ({ index: i, title: item.title, questionType: item.questionItem?.question?.choiceQuestion ? "multiple_choice" : item.questionItem?.question?.textQuestion ? "text" : "other", options: item.questionItem?.question?.choiceQuestion?.options?.map(o => o.value) || [] })))
+      : "";
+
+    const completion = await groq.chat.completions.create({
+      model: "openai/gpt-oss-120b", temperature: 0.1,
+      messages: [
+        { role: "system", content: `You are a Google Form field analyzer. Given extracted text/labels from a Google Form, identify which fields correspond to:
+- name: The participant/team leader/person's name field
+- phone: Phone number / contact number / mobile field
+- email: Email address field
+- category: A field that determines pricing tier (could be a role, type, membership, track selection, etc.)
+
+Also identify any other notable fields and what they contain.
+
+RESPOND ONLY IN VALID JSON with this exact format:
+{
+  "formTitle": "detected form title",
+  "fields": [
+    { "index": 0, "label": "field label from form", "mappedTo": "name|phone|email|category|other", "confidence": "high|medium|low", "notes": "why this mapping" }
+  ],
+  "nameFieldIndex": 0,
+  "phoneFieldIndex": 1,
+  "emailFieldIndex": 2,
+  "categoryFieldIndex": null,
+  "categoryOptions": [],
+  "defaultCategory": "General",
+  "warnings": ["any issues or concerns"],
+  "summary": "one line summary of what this form collects"
+}
+
+If there's no clear category/type field, set categoryFieldIndex to null and defaultCategory to "General".
+If the form has a fixed price for everyone, note that in warnings.
+Be smart about it — "Team Leader Name" or "Team Name" maps to name, "Contact Number" maps to phone, "Track" or "Membership Type" could map to category.
+If you see field labels that hint at names (team, leader, participant), phone (contact, mobile, number), email (email, mail), identify them.
+Even if extractedLabels is empty, try to infer from the rawSnippet HTML what the form fields might be.` },
+        { role: "user", content: JSON.stringify({
+          formTitle,
+          extractedLabels: fieldLabels.slice(0, 50),
+          totalLabelsFound: fieldLabels.length,
+          structuredFormItems: formContext || undefined,
+          eventCategories: categories,
+          eventName: event.name
+        }) }
+      ]
+    });
+
+    let aiResponse = completion.choices[0]?.message?.content || "";
+    
+    // Parse AI response
+    let fieldMapping = null;
+    try {
+      // Extract JSON from response (handle markdown code blocks)
+      const jsonMatch = aiResponse.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, aiResponse];
+      const jsonStr = jsonMatch[1].trim();
+      fieldMapping = JSON.parse(jsonStr);
+    } catch (e) {
+      // If JSON parsing fails, try to extract it differently
+      try {
+        const startIdx = aiResponse.indexOf("{");
+        const endIdx = aiResponse.lastIndexOf("}");
+        if (startIdx !== -1 && endIdx !== -1) {
+          fieldMapping = JSON.parse(aiResponse.substring(startIdx, endIdx + 1));
+        }
+      } catch {}
+    }
+
+    if (!fieldMapping) {
+      return res.status(502).json({ error: "AI could not analyze the form structure. Try again or check the form URL." });
+    }
+
+    // Generate custom Apps Script based on the field mapping
+    const nameIdx = fieldMapping.nameFieldIndex ?? 0;
+    const phoneIdx = fieldMapping.phoneFieldIndex ?? 1;
+    const emailIdx = fieldMapping.emailFieldIndex ?? 2;
+    const catIdx = fieldMapping.categoryFieldIndex;
+    const defaultCat = fieldMapping.defaultCategory || "General";
+
+    const intakeUrl = `${process.env.CLIENT_ORIGIN || "http://localhost:5000"}/api/intake/${event.intakeToken}`;
+
+    const appsScript = `// ==== EventPay Sentinel - Auto Generated ====
+// Custom script for: ${formTitle || event.name}
+// Generated by AI based on your form structure
+// Paste this in your Google Form's Apps Script editor
+
+const INTAKE_URL = "${intakeUrl}";
+
+function onFormSubmit(e) {
+  const responses = e.response.getItemResponses();
+  
+  // Field mapping (auto-detected from your form):
+  // Index ${nameIdx}: Name field${fieldMapping.fields?.[nameIdx] ? ` ("${fieldMapping.fields[nameIdx].label}")` : ""}
+  // Index ${phoneIdx}: Phone field${fieldMapping.fields?.[phoneIdx] ? ` ("${fieldMapping.fields[phoneIdx].label}")` : ""}
+  // Index ${emailIdx}: Email field${fieldMapping.fields?.[emailIdx] ? ` ("${fieldMapping.fields[emailIdx].label}")` : ""}
+  ${catIdx !== null ? `// Index ${catIdx}: Category field${fieldMapping.fields?.[catIdx] ? ` ("${fieldMapping.fields[catIdx].label}")` : ""}` : "// No category field detected — using default: " + defaultCat}
+
+  const name = responses[${nameIdx}]?.getResponse() || "";
+  const phone = responses[${phoneIdx}]?.getResponse() || "";
+  const email = responses[${emailIdx}]?.getResponse() || "";
+  ${catIdx !== null ? `const category = responses[${catIdx}]?.getResponse() || "${defaultCat}";` : `const category = "${defaultCat}";`}
+
+  const payload = { name, phone, email, category };
+
+  const options = {
+    method: "post",
+    contentType: "application/json",
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  try {
+    const res = UrlFetchApp.fetch(INTAKE_URL, options);
+    Logger.log("EventPay Response: " + res.getContentText());
+  } catch (err) {
+    Logger.log("EventPay Error: " + err.message);
+  }
+}
+
+// Run this ONCE to set up the auto-trigger
+function setupTrigger() {
+  const form = FormApp.getActiveForm();
+  ScriptApp.newTrigger("onFormSubmit")
+    .forForm(form)
+    .onFormSubmit()
+    .create();
+  Logger.log("Trigger created!");
+}`;
+
+    // Save form URL and mapping to event
+    event.googleFormUrl = formUrl;
+    event.fieldMapping = fieldMapping;
+    await event.save();
+
+    res.json({
+      formTitle: fieldMapping.formTitle || formTitle,
+      fieldMapping,
+      appsScript,
+      intakeUrl,
+      summary: fieldMapping.summary || "Form analyzed successfully",
+      warnings: fieldMapping.warnings || []
+    });
+  } catch (e) {
+    console.error("Form analysis error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ============ VERIFY SETUP (Real AI Check) ============
+app.post("/api/events/:eventId/verify-setup", auth, async (req, res) => {
   try {
     const event = await Event.findById(req.params.eventId);
     if (!event) return res.status(404).json({ error: "Event not found" });
 
-    const demoRegs = [
-      { name: "Aarav Sharma", phone: "9876543210", email: "aarav@test.com", ticketType: "Tech Pass", expectedAmount: 799, paymentStatus: "payment_verified", entryStatus: "entry_approved", amountReceived: 799, riskScore: 2 },
-      { name: "Riya Verma", phone: "9876543211", email: "riya@test.com", ticketType: "General", expectedAmount: 499, paymentStatus: "suspicious", entryStatus: "entry_held", amountReceived: 0, riskScore: 85, riskReasons: ["Payment not found", "Screenshot submitted but no matching payment"] },
-      { name: "Karan Singh", phone: "9876543212", email: "karan@test.com", ticketType: "Tech Pass", expectedAmount: 799, paymentStatus: "amount_mismatch", entryStatus: "not_ready", amountReceived: 499, riskScore: 60, riskReasons: ["Amount mismatch: expected ₹799, received ₹499"] },
-      { name: "Priya Patel", phone: "9876543213", email: "priya@test.com", ticketType: "General", expectedAmount: 499, paymentStatus: "duplicate_claim", entryStatus: "entry_held", amountReceived: 499, riskScore: 90, riskReasons: ["Same UTR claimed by REG-1001 and REG-1004"] },
-      { name: "Arjun Kumar", phone: "9876543214", email: "arjun@test.com", ticketType: "General", expectedAmount: 499, paymentStatus: "awaiting_payment", entryStatus: "not_ready", amountReceived: 0, riskScore: 0 },
-      { name: "Neha Gupta", phone: "9876543215", email: "neha@test.com", ticketType: "VIP", expectedAmount: 1499, paymentStatus: "payment_verified", entryStatus: "entry_approved", amountReceived: 1499, riskScore: 0 }
-    ];
+    const checks = [];
 
-    let created = 0;
-    for (const d of demoRegs) {
-      const exists = await Registration.findOne({ eventId: event._id, phone: d.phone });
-      if (exists) continue;
-      const count = await Registration.countDocuments({ eventId: event._id });
-      const registrationId = `REG-${String(count + 1001).padStart(4, "0")}`;
-      const entryToken = crypto.randomBytes(20).toString("hex");
-      await Registration.create({ eventId: event._id, registrationId, entryToken, ...d });
-      created++;
+    // Check 1: Event has valid data
+    if (event.name && event.eventDate) {
+      checks.push({ ok: true, label: "Event Configuration", msg: `Event "${event.name}" is configured with date ${new Date(event.eventDate).toLocaleDateString("en-IN")}` });
+    } else {
+      checks.push({ ok: false, label: "Event Configuration", msg: "Event is missing name or date" });
     }
 
-    // Create risk queue entries
-    const suspiciousRegs = await Registration.find({ eventId: event._id, riskScore: { $gte: 50 } });
-    for (const r of suspiciousRegs) {
-      const exists = await RiskQueue.findOne({ eventId: event._id, registrationId: r.registrationId });
-      if (!exists) {
-        await RiskQueue.create({ eventId: event._id, registrationId: r.registrationId, type: r.paymentStatus === "duplicate_claim" ? "duplicate_utr" : r.paymentStatus === "amount_mismatch" ? "amount_mismatch" : "payment_not_found", severity: r.riskScore >= 80 ? "critical" : r.riskScore >= 60 ? "high" : "medium", details: { reasons: r.riskReasons, expectedAmount: r.expectedAmount, receivedAmount: r.amountReceived } });
+    // Check 2: Pricing categories exist
+    if (event.ticketTypes && event.ticketTypes.length > 0) {
+      const cats = event.ticketTypes.map(t => `${t.name} (₹${t.price})`).join(", ");
+      checks.push({ ok: true, label: "Pricing Categories", msg: `${event.ticketTypes.length} categories: ${cats}` });
+    } else {
+      checks.push({ ok: false, label: "Pricing Categories", msg: "No pricing categories configured — payment links cannot be generated" });
+    }
+
+    // Check 3: General fallback exists
+    const hasGeneral = event.ticketTypes?.some(t => t.name.toLowerCase() === "general");
+    if (hasGeneral) {
+      checks.push({ ok: true, label: "Default Fallback", msg: "'General' category exists as fallback for unmatched submissions" });
+    } else {
+      checks.push({ ok: false, label: "Default Fallback", msg: "No 'General' category — submissions without a category match will fail" });
+    }
+
+    // Check 4: Intake token is valid
+    if (event.intakeToken) {
+      checks.push({ ok: true, label: "Intake URL", msg: "Intake token is active and ready to receive Google Form submissions" });
+    } else {
+      checks.push({ ok: false, label: "Intake URL", msg: "No intake token — Google Form cannot connect to this event" });
+    }
+
+    // Check 5: Razorpay credentials
+    let razorpayOk = false;
+    if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+      try {
+        const razorpay = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET });
+        // Test API call - fetch account to verify credentials
+        await razorpay.payments.all({ count: 1 });
+        razorpayOk = true;
+        checks.push({ ok: true, label: "Razorpay Connection", msg: "Razorpay API credentials are valid and connected" });
+      } catch (e) {
+        checks.push({ ok: false, label: "Razorpay Connection", msg: `Razorpay credentials failed: ${e.message}` });
       }
+    } else {
+      checks.push({ ok: false, label: "Razorpay Connection", msg: "Razorpay API keys not configured — payment links will NOT be generated" });
     }
 
-    res.json({ created, message: `${created} demo registrations added` });
+    // Check 6: Test payment link creation (real Razorpay test)
+    let testPaymentLink = null;
+    if (razorpayOk && event.ticketTypes?.length > 0) {
+      try {
+        const razorpay = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET });
+        const testTicket = event.ticketTypes[0];
+        const link = await razorpay.paymentLink.create({
+          amount: testTicket.price * 100,
+          currency: "INR",
+          description: `[TEST] ${event.name} - ${testTicket.name}`,
+          customer: { name: "Test User", contact: "9999999999" },
+          notify: { sms: false, email: false },
+          notes: { test: "true", eventId: String(event._id) },
+          expire_by: Math.floor(Date.now() / 1000) + 300 // expires in 5 mins
+        });
+        testPaymentLink = link.short_url;
+        checks.push({ ok: true, label: "Payment Link Generation", msg: `Razorpay payment link created successfully for "${testTicket.name}" (₹${testTicket.price}). Test link: ${link.short_url}` });
+
+        // Cancel the test link immediately
+        try { await razorpay.paymentLink.cancel(link.id); } catch {}
+      } catch (e) {
+        checks.push({ ok: false, label: "Payment Link Generation", msg: `Failed to create payment link: ${e.message}` });
+      }
+    } else if (!razorpayOk) {
+      checks.push({ ok: false, label: "Payment Link Generation", msg: "Skipped — Razorpay not connected" });
+    }
+
+    // Check 7: Test intake endpoint (simulate a Google Form submission)
+    let testRegId = null;
+    if (event.intakeToken && event.ticketTypes?.length > 0) {
+      const testPhone = `TEST${Date.now()}`;
+      const testCategory = event.ticketTypes[0].name;
+      try {
+        // Simulate what Google Form Apps Script would send
+        const existingDup = await Registration.findOne({ eventId: event._id, phone: testPhone });
+        if (!existingDup) {
+          const count = await Registration.countDocuments({ eventId: event._id });
+          const registrationId = `TEST-${String(count + 9001).padStart(4, "0")}`;
+          const entryToken = crypto.randomBytes(20).toString("hex");
+          const reg = await Registration.create({
+            eventId: event._id, registrationId, name: "Test Submission",
+            phone: testPhone, email: "", college: "", ticketType: testCategory,
+            expectedAmount: event.ticketTypes[0].price, numberOfTickets: 1, entryToken
+          });
+          testRegId = reg._id;
+          checks.push({ ok: true, label: "Intake Pipeline", msg: `Test registration created (${registrationId}) with category "${testCategory}" → ₹${event.ticketTypes[0].price}. Pipeline is working.` });
+
+          // Cleanup test registration
+          await Registration.findByIdAndDelete(reg._id);
+        }
+      } catch (e) {
+        checks.push({ ok: false, label: "Intake Pipeline", msg: `Intake simulation failed: ${e.message}` });
+      }
+    } else {
+      checks.push({ ok: false, label: "Intake Pipeline", msg: "Cannot test — missing intake token or categories" });
+    }
+
+    // Check 8: Webhook secret
+    if (process.env.RAZORPAY_WEBHOOK_SECRET) {
+      checks.push({ ok: true, label: "Webhook Verification", msg: "Razorpay webhook secret is configured — payments will be auto-verified" });
+    } else {
+      checks.push({ ok: false, label: "Webhook Verification", msg: "No webhook secret — payments won't be auto-verified. Set RAZORPAY_WEBHOOK_SECRET in your environment." });
+    }
+
+    // Check 9: MongoDB connection
+    if (mongoose.connection.readyState === 1) {
+      checks.push({ ok: true, label: "Database", msg: "MongoDB is connected and responsive" });
+    } else {
+      checks.push({ ok: false, label: "Database", msg: "Database connection is down" });
+    }
+
+    // Overall verdict
+    const passed = checks.filter(c => c.ok).length;
+    const total = checks.length;
+    const allGood = checks.every(c => c.ok);
+
+    // AI Analysis (Groq) — second layer of verification
+    let aiAnalysis = "";
+    if (process.env.GROQ_API_KEY) {
+      try {
+        const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+        const completion = await groq.chat.completions.create({
+          model: "openai/gpt-oss-120b", temperature: 0.3,
+          messages: [
+            { role: "system", content: `You are EventPay Sentinel's setup verification AI. You review technical check results of an event payment pipeline (Google Form → intake endpoint → Razorpay payment link → webhook verification). Give a concise, actionable summary in 4-6 bullet points. Mention: 1) Is the pipeline ready? 2) Any risks or flaws? 3) What could go wrong during real usage? 4) Specific recommendations. Be direct, practical, and mention exact fixes if something is wrong. Use plain language, no jargon. Keep it under 200 words.` },
+            { role: "user", content: JSON.stringify({
+              event: { name: event.name, date: event.eventDate, categories: event.ticketTypes?.map(t => ({ name: t.name, price: t.price })), intakeToken: Boolean(event.intakeToken) },
+              checkResults: checks.map(c => ({ label: c.label, passed: c.ok, detail: c.msg })),
+              summary: { passed, total, allGood },
+              razorpayConfigured: Boolean(process.env.RAZORPAY_KEY_ID),
+              webhookConfigured: Boolean(process.env.RAZORPAY_WEBHOOK_SECRET)
+            }) }
+          ]
+        });
+        aiAnalysis = completion.choices[0]?.message?.content || "";
+      } catch (e) {
+        aiAnalysis = `AI analysis unavailable: ${e.message}`;
+      }
+    } else {
+      aiAnalysis = "AI analysis skipped — GROQ_API_KEY not configured.";
+    }
+
+    res.json({ checks, passed, total, allGood, testPaymentLink, aiAnalysis });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
