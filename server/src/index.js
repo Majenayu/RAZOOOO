@@ -1367,12 +1367,34 @@ app.post("/api/events/:eventId/demo-reset", auth, async (req, res) => {
   try {
     const event = await Event.findById(req.params.eventId);
     if (!event || String(event.organizerId) !== String(req.userId)) return res.status(403).json({ error: "Not authorized" });
+    // Include demo records created before the isDemo marker was introduced.
+    const demoRegs = await Registration.find({
+      eventId: req.params.eventId,
+      $or: [
+        { isDemo: true },
+        { paymentId: /^pay_demo_/ },
+        { college: "Demo College", email: /@example\.com$/i }
+      ]
+    }).select("registrationId");
+    const demoRegistrationIds = demoRegs.map(r => r.registrationId);
+    const demoRecordFilter = { eventId: req.params.eventId, $or: [{ isDemo: true }, { registrationId: { $in: demoRegistrationIds } }] };
+    const demoAuditFilter = {
+      eventId: req.params.eventId,
+      $or: [
+        { isDemo: true },
+        { action: "demo.seeded" },
+        { target: { $in: demoRegistrationIds } }
+      ]
+    };
     await Promise.all([
-      Registration.deleteMany({ eventId: req.params.eventId, isDemo: true }),
-      PaymentEvent.deleteMany({ eventId: req.params.eventId, isDemo: true }),
-      RiskQueue.deleteMany({ eventId: req.params.eventId, isDemo: true }),
-      MessageLog.deleteMany({ eventId: req.params.eventId, isDemo: true }),
-      AuditLog.deleteMany({ eventId: req.params.eventId, isDemo: true })
+      Registration.deleteMany({ eventId: req.params.eventId, _id: { $in: demoRegs.map(r => r._id) } }),
+      PaymentEvent.deleteMany({
+        eventId: req.params.eventId,
+        $or: [{ isDemo: true }, { razorpayPaymentId: /^pay_demo_/ }, { registrationId: { $in: demoRegistrationIds } }]
+      }),
+      RiskQueue.deleteMany(demoRecordFilter),
+      MessageLog.deleteMany(demoRecordFilter),
+      AuditLog.deleteMany(demoAuditFilter)
     ]);
     res.json({ success: true, message: "Demo data cleared; your original data was kept" });
   } catch (e) { res.status(500).json({ error: e.message }); }
