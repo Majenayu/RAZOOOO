@@ -210,31 +210,38 @@ function EventsApp() {
 
   if (selectedEvent) return <EventDashboard event={selectedEvent} view={view} setView={setView} onBack={() => { setSelectedEvent(null); setView("dashboard"); }} notify={notify} toast={toast} />;
 
+  const liveEvents = events.filter(ev => ev.status === "live").length;
+  const sharedEvents = events.filter(ev => ev.organizerId?._id && ev.organizerId._id !== user?.id).length;
+
   return <div className="app-shell">
-    <header className="app-header"><div className="app-brand"><span className="brand-mark"><SentinelIcon size={17} /></span> EventPay Sentinel</div><div className="app-user"><span>{user?.name}</span><small>{user?.role}</small><button className="btn-ghost btn-sm" onClick={logout}>Logout</button></div></header>
+    <header className="app-header"><div className="app-brand"><span className="brand-mark"><SentinelIcon size={17} /></span> EventPay Sentinel</div><div className="app-user"><span className="user-avatar">{user?.name?.charAt(0)?.toUpperCase() || "U"}</span><div className="user-copy"><strong>{user?.name}</strong><small>{user?.role || "Organizer"}</small></div><button className="btn-ghost btn-sm" onClick={logout}>Log out</button></div></header>
     <main className="events-page">
-      <div className="workspace-intro">
+      <div className="workspace-intro events-intro">
         <div>
-          <span className="eyebrow">EVENT OPERATIONS</span>
-          <h1>Your events</h1>
-          <p>Choose an event to see payment health, fraud alerts, and who is ready to enter.</p>
+          <span className="eyebrow">YOUR WORKSPACE</span>
+          <h1>Good to see you, {user?.name?.split(" ")[0] || "there"}</h1>
+          <p>Manage registrations, payments, and entry for every event from one place.</p>
         </div>
         <CreateEventBtn onCreated={ev => { setEvents(p => [ev, ...p]); notify("Event created!"); }} />
       </div>
-      {events.length ? <div className="events-grid">{events.map(ev => <div key={ev._id} className="event-card">
-        <div className="ec-main" onClick={() => { setSelectedEvent(ev); setView("dashboard"); }}>
+      <div className="events-overview">
+        <div className="overview-stat"><span className="overview-icon"><SentinelIcon type="command" size={18} /></span><div><strong>{events.length}</strong><span>Total events</span></div></div>
+        <div className="overview-stat"><span className="overview-icon overview-live"><i /></span><div><strong>{liveEvents}</strong><span>Live now</span></div></div>
+        <div className="overview-stat"><span className="overview-icon"><SentinelIcon type="messages" size={18} /></span><div><strong>{sharedEvents}</strong><span>Shared with you</span></div></div>
+      </div>
+      <div className="events-section-heading"><div><h2>All events</h2><p>Open an event to view its command center.</p></div>{events.length > 0 && <span className="events-count">{events.length} {events.length === 1 ? "event" : "events"}</span>}</div>
+      {events.length ? <div className="events-grid">{events.map(ev => <article key={ev._id} className="event-card">
+        <div className="ec-main">
+          <div className="ec-topline"><span className={`badge badge-${ev.status}`}>{ev.status}</span>{ev.organizerId?._id && ev.organizerId._id !== user?.id ? <span className="shared-badge">Shared with you</span> : <span className="ec-role">Your event</span>}</div>
           <h3>{ev.name}</h3>
-          <p>{new Date(ev.eventDate).toLocaleDateString("en-IN")}</p>
-          {ev.organizerId?.name && ev.organizerId._id !== user?.id && <p className="ec-owner">by {ev.organizerId.name}</p>}
-          <div className="ec-cats">{ev.ticketTypes?.map((t, i) => <span key={i} className="cat-mini">{t.name} ₹{t.price}</span>)}</div>
-          <span className={`badge badge-${ev.status}`}>{ev.status}</span>
+          <div className="ec-meta"><span><SentinelIcon type="command" size={14} />{new Date(ev.eventDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>{ev.venue && <span><SentinelIcon type="entry" size={14} />{ev.venue}</span>}</div>
+          {ev.organizerId?.name && ev.organizerId._id !== user?.id && <p className="ec-owner">Organized by {ev.organizerId.name}</p>}
+          <div className="ec-cats">{ev.ticketTypes?.slice(0, 3).map((t, i) => <span key={i} className="cat-mini">{t.name} <b>₹{t.price}</b></span>)}{ev.ticketTypes?.length > 3 && <span className="cat-more">+{ev.ticketTypes.length - 3} more</span>}</div>
         </div>
-        <div className="ec-actions">
-          {(!ev.organizerId?._id || ev.organizerId._id === user?.id) && <><button className="btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); setEditingEvent(ev); }}>Edit</button>
-          <button className="btn-ghost btn-sm btn-danger" onClick={(e) => { e.stopPropagation(); setDeleteConfirm(ev); }}>Delete</button></>}
-          {ev.organizerId?._id && ev.organizerId._id !== user?.id && <span className="shared-badge">Shared with you</span>}
+        <div className="ec-actions"><button className="btn-primary open-event" onClick={() => { setSelectedEvent(ev); setView("dashboard"); }}>Open event <span>→</span></button>
+          {(!ev.organizerId?._id || ev.organizerId._id === user?.id) && <div className="ec-manage"><button className="btn-ghost btn-sm" onClick={() => setEditingEvent(ev)}>Edit</button><button className="btn-ghost btn-sm btn-danger" onClick={() => setDeleteConfirm(ev)}>Delete</button></div>}
         </div>
-      </div>)}</div> : <p className="empty">No events yet. Create your first event to get started.</p>}
+      </article>)}</div> : <div className="events-empty"><span className="empty-icon"><SentinelIcon type="command" size={26} /></span><h2>Your event workspace is ready</h2><p>Create your first event to start collecting registrations and tracking payments.</p><CreateEventBtn onCreated={ev => { setEvents(p => [ev, ...p]); notify("Event created!"); }} /></div>}
     </main>
     {toast && <div className="toast">{toast}</div>}
 
