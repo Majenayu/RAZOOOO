@@ -654,94 +654,173 @@ app.get("/api/events/:eventId/messages", auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ============ AI INVESTIGATION ============
+// ============ AI INVESTIGATION (RAG Pattern) ============
+
+// Step 1: Intent detection + focused retrieval
+async function retrieveContext(question, eventId) {
+  const q = question.toLowerCase();
+  const oid = new mongoose.Types.ObjectId(eventId);
+  const context = { intent: "general", records: [] };
+
+  // Detect if question is about a specific registration
+  const regMatch = question.match(/REG-\d{4,}[A-Z0-9-]*/i);
+  if (regMatch) {
+    context.intent = "specific_registration";
+    const reg = await Registration.findOne({ eventId, registrationId: { $regex: regMatch[0], $options: "i" } });
+    if (reg) {
+      const payments = await PaymentEvent.find({ $or: [{ registrationId: reg.registrationId }, { eventId, contact: { $regex: reg.phone.slice(-10) } }] });
+      const risks = await RiskQueue.find({ eventId, registrationId: reg.registrationId });
+      const audits = await AuditLog.find({ eventId, target: reg.registrationId }).sort({ createdAt: -1 }).limit(10);
+      const duplicates = reg.utr ? await Registration.find({ eventId, utr: reg.utr, registrationId: { $ne: reg.registrationId } }).select("registrationId name phone") : [];
+      context.records = [
+        { type: "Registration", data: reg.toObject() },
+        ...payments.map(p => ({ type: "Payment", data: p.toObject() })),
+        ...risks.map(r => ({ type: "RiskCase", data: r.toObject() })),
+        ...audits.map(a => ({ type: "AuditAction", data: { action: a.action, target: a.target, reason: a.reason, time: a.createdAt } })),
+        ...duplicates.map(d => ({ type: "DuplicateClaim", data: { registrationId: d.registrationId, name: d.name, phone: d.phone } }))
+      ];
+    }
+    return context;
+  }
+
+  // Duplicates/UTR
+  if (q.includes("duplicate") || q.includes("utr") || q.includes("reuse")) {
+    context.intent = "duplicates";
+    const dupes = await Registration.find({ eventId, paymentStatus: "duplicate_claim" }).select("registrationId name phone utr expectedAmount amountReceived riskReasons");
+    const riskCases = await RiskQueue.find({ eventId, type: { $in: ["duplicate_utr", "reused_payment"] } });
+    context.records = [...dupes.map(r => ({ type: "Registration", data: r.toObject() })), ...riskCases.map(r => ({ type: "RiskCase", data: r.toObject() }))];
+    return context;
+  }
+
+  // Amount mismatches
+  if (q.includes("mismatch") || q.includes("amount") || q.includes("less") || q.includes("short")) {
+    context.intent = "amount_issues";
+    const mismatches = await Registration.find({ eventId, paymentStatus: "amount_mismatch" }).select("registrationId name phone expectedAmount amountReceived riskReasons");
+    const riskCases = await RiskQueue.find({ eventId, type: "amount_mismatch" });
+    context.records = [...mismatches.map(r => ({ type: "Registration", data: r.toObject() })), ...riskCases.map(r => ({ type: "RiskCase", data: r.toObject() }))];
+    return context;
+  }
+
+  // Pending/unpaid
+  if (q.includes("pending") || q.includes("awaiting") || q.includes("not paid") || q.includes("nahi")) {
+    context.intent = "pending_payments";
+    const pending = await Registration.find({ eventId, paymentStatus: "awaiting_payment" }).select("registrationId name phone expectedAmount ticketType createdAt").limit(30);
+    context.records = pending.map(r => ({ type: "Registration", data: r.toObject() }));
+    return context;
+  }
+
+  // Risk/fraud
+  if (q.includes("risk") || q.includes("suspicious") || q.includes("fraud") || q.includes("fake") || q.includes("dhokha")) {
+    context.intent = "risk_cases";
+    const risks = await RiskQueue.find({ eventId, status: { $in: ["open", "reviewing"] } });
+    const suspRegs = await Registration.find({ eventId, paymentStatus: { $in: ["suspicious", "duplicate_claim"] } }).select("registrationId name phone riskScore riskReasons paymentStatus");
+    context.records = [...risks.map(r => ({ type: "RiskCase", data: r.toObject() })), ...suspRegs.map(r => ({ type: "FlaggedRegistration", data: r.toObject() }))];
+    return context;
+  }
+
+  // Entry/verified/paid
+  if (q.includes("enter") || q.includes("verified") || q.includes("approved") || q.includes("ready") || q.includes("who can")) {
+    context.intent = "entry_ready";
+    const verified = await Registration.find({ eventId, paymentStatus: "payment_verified" }).select("registrationId name ticketType amountReceived entryStatus").limit(30);
+    context.records = verified.map(r => ({ type: "Registration", data: r.toObject() }));
+    return context;
+  }
+
+  // Financial/money
+  if (q.includes("money") || q.includes("total") || q.includes("settlement") || q.includes("paisa") || q.includes("kitna") || q.includes("collection")) {
+    context.intent = "financial";
+    const metrics = await Registration.aggregate([{ $match: { eventId: oid } }, { $group: { _id: "$paymentStatus", count: { $sum: 1 }, total: { $sum: "$expectedAmount" }, received: { $sum: "$amountReceived" } } }]);
+    const paymentTotals = await PaymentEvent.aggregate([{ $match: { eventId: oid } }, { $group: { _id: "$status", count: { $sum: 1 }, total: { $sum: "$amount" } } }]);
+    context.records = [{ type: "Metrics", data: { registrationsByStatus: metrics, paymentsByStatus: paymentTotals } }];
+    return context;
+  }
+
+  // General fallback — balanced summary
+  context.intent = "general";
+  const [metrics, topRisks, recentPayments] = await Promise.all([
+    Registration.aggregate([{ $match: { eventId: oid } }, { $group: { _id: "$paymentStatus", count: { $sum: 1 }, total: { $sum: "$expectedAmount" }, received: { $sum: "$amountReceived" } } }]),
+    RiskQueue.find({ eventId, status: "open" }).sort({ severity: -1 }).limit(5),
+    PaymentEvent.find({ eventId }).sort({ createdAt: -1 }).limit(5).select("registrationId amount status method createdAt")
+  ]);
+  context.records = [{ type: "Metrics", data: metrics }, ...topRisks.map(r => ({ type: "RiskCase", data: { registrationId: r.registrationId, type: r.type, severity: r.severity } })), ...recentPayments.map(p => ({ type: "RecentPayment", data: p.toObject() }))];
+  return context;
+}
+
 app.post("/api/events/:eventId/ai/investigate", auth, async (req, res) => {
   try {
     const { question } = req.body;
     if (!question) return res.status(400).json({ error: "Question is required" });
     const eventId = req.params.eventId;
 
-    // Gather context
-    const [metrics, regs, risks, payments, audits] = await Promise.all([
-      Registration.aggregate([{ $match: { eventId: new mongoose.Types.ObjectId(eventId) } }, { $group: { _id: "$paymentStatus", count: { $sum: 1 }, total: { $sum: "$expectedAmount" }, received: { $sum: "$amountReceived" } } }]),
-      Registration.find({ eventId }).select("registrationId name phone paymentStatus entryStatus expectedAmount amountReceived riskReasons riskScore ticketType utr paymentId").limit(50),
-      RiskQueue.find({ eventId, status: { $in: ["open", "reviewing"] } }).limit(20),
-      PaymentEvent.find({ eventId }).select("registrationId amount status razorpayPaymentId utr method contact matched matchConfidence").limit(30),
-      AuditLog.find({ eventId }).sort({ createdAt: -1 }).limit(20).select("action target reason createdAt")
-    ]);
+    // RAG Step 1: Focused retrieval based on question intent
+    const context = await retrieveContext(question, eventId);
+    const safetyNote = "AI is READ-ONLY. Cannot approve, refund, move money, or delete. Human decides.";
 
-    const contextData = { question, metrics, registrations: regs.slice(0, 30), risks, payments: payments.slice(0, 20), recentAuditActions: audits.slice(0, 10) };
+    // RAG Step 2: Pass ONLY relevant records to AI
+    const aiProvider = process.env.NVIDIA_API_KEY ? "nvidia" : process.env.GROQ_API_KEY ? "groq" : null;
 
-    // AI Safety Boundary
-    const safetyNote = "IMPORTANT: AI is READ-ONLY. AI cannot approve entry, refund payments, move money, or delete records. A human operator makes the final decision.";
-
-    // Try Groq AI first
-    if (process.env.GROQ_API_KEY) {
+    if (aiProvider) {
       try {
-        const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-        const completion = await groq.chat.completions.create({
-          model: "openai/gpt-oss-120b", temperature: 0.2,
-          messages: [
-            { role: "system", content: `You are EventPay Sentinel AI — a payment fraud investigation assistant.
+        const systemPrompt = `You are FormPay AI — a payment fraud investigation assistant for Indian events.
 
-RESPOND IN VALID JSON with this exact structure:
+YOU HAVE EXACTLY ${context.records.length} RECORDS. These are the ONLY facts. Do NOT invent IDs, UTRs, amounts, or names not in this data.
+
+RESPOND IN VALID JSON:
 {
   "decision": "safe|suspicious|fraud|insufficient_data",
   "riskLevel": "low|medium|high|critical",
   "confidence": "high|medium|low",
   "summary": "one-line conclusion",
-  "evidence": [
-    { "source": "Registration/Payment/RiskQueue/Audit", "id": "record ID", "fact": "what was found" }
-  ],
-  "missingInfo": ["what data would help but is not available"],
-  "recommendedAction": "what the operator should do",
-  "allowedActions": ["actions the operator CAN take"],
-  "forbiddenActions": ["actions that should NOT be taken without more evidence"],
-  "explanation": "2-3 sentence detailed explanation with reasoning"
+  "evidence": [{ "source": "record type from data", "id": "actual ID from data", "fact": "what you found" }],
+  "missingInfo": ["what's NOT in the data that would help"],
+  "recommendedAction": "what operator should do",
+  "allowedActions": ["safe actions"],
+  "forbiddenActions": ["risky actions"],
+  "explanation": "2-3 sentences citing specific records from the data"
 }
 
 Rules:
-- Use ONLY the provided data. Never invent payment IDs, UTRs, or amounts.
-- Every conclusion must cite a specific record as evidence.
-- If data is insufficient, say so with confidence: "low".
-- Support Hindi/Hinglish if the question is in Hindi.
-- ${safetyNote}` },
-            { role: "user", content: JSON.stringify(contextData) }
-          ]
-        });
+- ONLY reference records from the provided data
+- If asked about something not in the data, say "insufficient_data" with confidence "low"
+- Support Hindi/Hinglish
+- ${safetyNote}`;
 
-        let aiResponse = completion.choices[0]?.message?.content || "";
-        
-        // Try to parse structured response
+        const userMsg = JSON.stringify({ question, intent: context.intent, totalRecords: context.records.length, data: context.records });
+
+        let aiResponse = "";
+        if (aiProvider === "nvidia") {
+          aiResponse = await callNvidiaAI([{ role: "system", content: systemPrompt }, { role: "user", content: userMsg }], "meta/llama-4-maverick-17b-128e", { temperature: 0.1, max_tokens: 1500 });
+        } else {
+          const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+          const c = await groq.chat.completions.create({ model: "openai/gpt-oss-120b", temperature: 0.1, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userMsg }] });
+          aiResponse = c.choices[0]?.message?.content || "";
+        }
+
         let structured = null;
         try {
           const jsonMatch = aiResponse.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, aiResponse];
-          const jsonStr = jsonMatch[1].trim();
-          structured = JSON.parse(jsonStr);
-        } catch {
-          try {
-            const startIdx = aiResponse.indexOf("{");
-            const endIdx = aiResponse.lastIndexOf("}");
-            if (startIdx !== -1 && endIdx !== -1) structured = JSON.parse(aiResponse.substring(startIdx, endIdx + 1));
-          } catch {}
-        }
+          structured = JSON.parse(jsonMatch[1].trim());
+        } catch { try { const s = aiResponse.indexOf("{"); const e = aiResponse.lastIndexOf("}"); if (s !== -1) structured = JSON.parse(aiResponse.substring(s, e + 1)); } catch {} }
 
         if (structured) {
           structured.safetyBoundary = safetyNote;
-          structured.source = "ai";
+          structured.source = aiProvider;
+          structured.retrievalIntent = context.intent;
+          structured.recordsUsed = context.records.length;
           return res.json({ structured, answer: structured.explanation || structured.summary, question });
         }
-
-        // If parsing failed, return raw text
-        return res.json({ answer: aiResponse, question, structured: null, safetyBoundary: safetyNote, source: "ai" });
-      } catch (e) {
-        console.error("AI investigation error:", e.message);
-        // Fall through to rule-based fallback
-      }
+        return res.json({ answer: aiResponse, question, structured: null, source: aiProvider, safetyBoundary: safetyNote });
+      } catch (e) { console.error("AI error:", e.message); }
     }
 
-    // Rule-based fallback when AI is unavailable
+    // RAG Step 3: Rule-based fallback using same retrieved context
+    const regs = context.records.filter(r => ["Registration", "FlaggedRegistration"].includes(r.type)).map(r => r.data);
+    const risks = context.records.filter(r => r.type === "RiskCase").map(r => r.data);
+    const payments = context.records.filter(r => ["Payment", "RecentPayment"].includes(r.type)).map(r => r.data);
+    const metrics = context.records.filter(r => r.type === "Metrics").map(r => r.data);
     const ruleResult = generateRuleBasedReport(question, regs, risks, payments, metrics);
+    ruleResult.retrievalIntent = context.intent;
+    ruleResult.recordsUsed = context.records.length;
     res.json({ structured: ruleResult, answer: ruleResult.explanation, question, source: "rules", safetyBoundary: safetyNote });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
