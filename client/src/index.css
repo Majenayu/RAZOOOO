@@ -767,3 +767,29 @@ tr.row-risk{background:#fff8f3}
   .hero h1{font-size:38px;letter-spacing:-1.5px}
   .hero p{font-size:15px}
 }
+
+/* Screenshot Verification */
+.screenshot-section,.batch-section{margin-top:20px;padding-top:20px;border-top:1px solid var(--border)}
+.screenshot-section h3,.batch-section h3{font-size:15px;font-weight:700;margin-bottom:4px}
+.ss-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.ss-form input[type="text"]{padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;width:160px}
+.ss-form input[type="file"]{font-size:12px}
+.ss-result{margin-top:14px;padding:16px;border-radius:10px;border:1px solid var(--border)}
+.ss-verified{background:var(--green-light);border-color:var(--green)}
+.ss-fraud_detected{background:var(--red-light);border-color:var(--red)}
+.ss-suspicious{background:var(--yellow-light);border-color:#f59e0b}
+.ss-not_in_system{background:var(--yellow-light);border-color:#f59e0b}
+.ss-unverified{background:var(--gray-light)}
+.ss-verdict{font-size:14px;font-weight:800;margin-bottom:8px}
+.ss-details p{font-size:12px;margin:3px 0}
+.ss-issues{margin-top:8px}
+
+/* Batch Actions */
+.batch-form{display:flex;gap:8px;margin-top:10px}
+.batch-form input{flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;outline:none}
+.batch-form input:focus{border-color:var(--accent)}
+.batch-plan{margin-top:14px;padding:16px;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow)}
+.bp-header{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.bp-header strong{font-size:13px}
+.bp-count{font-size:12px;color:var(--text2);margin:6px 0}
+.bp-actions{display:flex;gap:8px;margin-top:10px}

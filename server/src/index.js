@@ -1279,6 +1279,283 @@ app.post("/api/events/:eventId/verify-setup", auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ============ NVIDIA AI FEATURES ============
+const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
+
+async function callNvidiaAI(messages, model = "meta/llama-4-maverick-17b-128e", options = {}) {
+  const apiKey = process.env.NVIDIA_API_KEY;
+  if (!apiKey) throw new Error("NVIDIA_API_KEY not configured");
+  const res = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, messages, temperature: options.temperature || 0.2, max_tokens: options.max_tokens || 2000, stream: false })
+  });
+  if (!res.ok) { const err = await res.text(); throw new Error(`NVIDIA API error (${res.status}): ${err}`); }
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || "";
+}
+
+// Screenshot Verification (Vision AI)
+app.post("/api/events/:eventId/verify-screenshot", auth, async (req, res) => {
+  try {
+    const { imageBase64, registrationId } = req.body;
+    if (!imageBase64) return res.status(400).json({ error: "Screenshot image (base64) is required" });
+    if (!process.env.NVIDIA_API_KEY) return res.status(503).json({ error: "NVIDIA AI not configured" });
+
+    const event = await Event.findById(req.params.eventId);
+    if (!event) return res.status(404).json({ error: "Event not found" });
+
+    // Find the registration to cross-check
+    let reg = null;
+    if (registrationId) {
+      reg = await Registration.findOne({ eventId: req.params.eventId, registrationId });
+    }
+
+    // Use NVIDIA vision model to extract payment details from screenshot
+    const visionResponse = await callNvidiaAI([
+      { role: "system", content: `You are a payment screenshot analyzer for Indian UPI/bank payments. Extract payment details from the screenshot image.
+
+RESPOND ONLY IN VALID JSON:
+{
+  "detected": true/false,
+  "utr": "UTR/transaction reference number if visible",
+  "amount": numeric amount if visible (in rupees, no paise),
+  "date": "date string if visible",
+  "payeeName": "recipient name if visible",
+  "payerName": "sender name if visible",
+  "upiId": "UPI ID if visible",
+  "method": "UPI/NEFT/IMPS/Card/Unknown",
+  "status": "Success/Failed/Pending/Unknown",
+  "suspicious": true/false,
+  "suspiciousReasons": ["list of reasons if suspicious"],
+  "confidence": "high/medium/low"
+}
+
+Check for signs of fake screenshots:
+- Inconsistent fonts or alignment
+- Edited/blurred UTR numbers
+- Amount doesn't match expected
+- Date is in the future or too old
+- Missing standard bank UI elements
+- Pixelation around numbers (editing artifacts)` },
+      { role: "user", content: [
+        { type: "text", text: `Analyze this payment screenshot. ${reg ? `Expected payment: ₹${reg.expectedAmount} for registration ${reg.registrationId}.` : "Extract all payment details."}` },
+        { type: "image_url", image_url: { url: `data:image/png;base64,${imageBase64}` } }
+      ] }
+    ], "meta/llama-4-maverick-17b-128e", { max_tokens: 1000 });
+
+    // Parse AI response
+    let analysis = null;
+    try {
+      const jsonMatch = visionResponse.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, visionResponse];
+      analysis = JSON.parse(jsonMatch[1].trim());
+    } catch {
+      try {
+        const start = visionResponse.indexOf("{");
+        const end = visionResponse.lastIndexOf("}");
+        if (start !== -1) analysis = JSON.parse(visionResponse.substring(start, end + 1));
+      } catch {}
+    }
+
+    if (!analysis) return res.status(502).json({ error: "AI could not analyze the screenshot" });
+
+    // Cross-check with database
+    let verification = { status: "unverified", matchedPayment: null, issues: [] };
+
+    if (analysis.utr && reg) {
+      // Check if this UTR exists in our payment events
+      const existingPayment = await PaymentEvent.findOne({ eventId: req.params.eventId, utr: analysis.utr });
+      if (existingPayment) {
+        if (existingPayment.registrationId === registrationId) {
+          verification.status = "verified";
+          verification.matchedPayment = existingPayment.razorpayPaymentId;
+        } else {
+          verification.status = "fraud_detected";
+          verification.issues.push(`UTR ${analysis.utr} is already claimed by registration ${existingPayment.registrationId}`);
+        }
+      } else {
+        verification.status = "not_in_system";
+        verification.issues.push("This UTR was not received via Razorpay webhook — payment may be fake or to a different account");
+      }
+    }
+
+    // Check amount match
+    if (analysis.amount && reg && analysis.amount !== reg.expectedAmount) {
+      verification.issues.push(`Screenshot shows ₹${analysis.amount} but expected ₹${reg.expectedAmount}`);
+    }
+
+    // Check for suspicious signs from AI
+    if (analysis.suspicious) {
+      verification.status = "suspicious";
+      verification.issues.push(...(analysis.suspiciousReasons || []));
+    }
+
+    // Check if UTR used by other registrations across ALL events
+    if (analysis.utr) {
+      const crossEventDupes = await PaymentEvent.find({ utr: analysis.utr, eventId: { $ne: req.params.eventId } });
+      if (crossEventDupes.length > 0) {
+        verification.status = "fraud_detected";
+        verification.issues.push(`This UTR has been used at ${crossEventDupes.length} other event(s) — cross-event fraud`);
+      }
+    }
+
+    await AuditLog.create({ eventId: req.params.eventId, actorId: req.userId, actorRole: req.role, action: "screenshot.verified", target: registrationId || "unknown", reason: `AI verdict: ${verification.status}` });
+
+    res.json({ analysis, verification, registrationId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Cross-Event Fraud Detection
+app.get("/api/events/:eventId/cross-event-check/:regId", auth, async (req, res) => {
+  try {
+    const reg = await Registration.findOne({ eventId: req.params.eventId, registrationId: req.params.regId });
+    if (!reg) return res.status(404).json({ error: "Registration not found" });
+
+    // Check this participant across ALL events
+    const [phoneMatches, emailMatches, utrMatches] = await Promise.all([
+      Registration.find({ phone: reg.phone, eventId: { $ne: req.params.eventId } }).select("registrationId eventId name paymentStatus riskScore createdAt").limit(20),
+      reg.email ? Registration.find({ email: reg.email, eventId: { $ne: req.params.eventId } }).select("registrationId eventId name paymentStatus riskScore createdAt").limit(20) : [],
+      reg.utr ? PaymentEvent.find({ utr: reg.utr, eventId: { $ne: req.params.eventId } }).select("registrationId eventId amount status createdAt").limit(10) : []
+    ]);
+
+    const flags = [];
+    if (phoneMatches.length > 3) flags.push({ signal: "Serial registrant", detail: `Phone ${reg.phone} found in ${phoneMatches.length} other events`, severity: "medium" });
+    const unpaidInOtherEvents = phoneMatches.filter(r => r.paymentStatus === "awaiting_payment").length;
+    if (unpaidInOtherEvents > 2) flags.push({ signal: "Habitual non-payer", detail: `${unpaidInOtherEvents} unpaid registrations at other events`, severity: "high" });
+    if (utrMatches.length > 0) flags.push({ signal: "Cross-event UTR reuse", detail: `UTR ${reg.utr} used at ${utrMatches.length} other event(s)`, severity: "critical" });
+    const flaggedElsewhere = phoneMatches.filter(r => r.riskScore >= 50).length;
+    if (flaggedElsewhere > 0) flags.push({ signal: "Flagged at other events", detail: `Flagged as suspicious at ${flaggedElsewhere} other event(s)`, severity: "high" });
+
+    // AI analysis if flags exist
+    let aiInsight = null;
+    if (flags.length > 0 && process.env.NVIDIA_API_KEY) {
+      try {
+        const aiResponse = await callNvidiaAI([
+          { role: "system", content: "You are a fraud analyst. Given cross-event data about a participant, provide a 2-3 sentence risk assessment. Be specific and actionable. Respond in plain text, not JSON." },
+          { role: "user", content: JSON.stringify({ participant: { name: reg.name, phone: reg.phone, currentEvent: reg.registrationId }, flags, otherEvents: phoneMatches.length, unpaidElsewhere: unpaidInOtherEvents }) }
+        ], "meta/llama-4-maverick-17b-128e", { max_tokens: 200 });
+        aiInsight = aiResponse;
+      } catch {}
+    }
+
+    res.json({ registration: reg.registrationId, name: reg.name, flags, phoneMatches: phoneMatches.length, emailMatches: emailMatches?.length || 0, utrMatches: utrMatches.length, riskLevel: flags.some(f => f.severity === "critical") ? "critical" : flags.some(f => f.severity === "high") ? "high" : flags.length > 0 ? "medium" : "low", aiInsight });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Smart Batch Actions via Natural Language
+app.post("/api/events/:eventId/ai/batch-action", auth, async (req, res) => {
+  try {
+    const { command } = req.body;
+    if (!command) return res.status(400).json({ error: "Command is required" });
+    if (!process.env.NVIDIA_API_KEY) return res.status(503).json({ error: "NVIDIA AI not configured" });
+
+    const event = await Event.findById(req.params.eventId);
+    if (!event) return res.status(404).json({ error: "Event not found" });
+    if (String(event.organizerId) !== String(req.userId)) return res.status(403).json({ error: "Only the event owner can run batch actions" });
+
+    // Get event context
+    const regCount = await Registration.countDocuments({ eventId: req.params.eventId });
+    const statuses = await Registration.aggregate([{ $match: { eventId: event._id } }, { $group: { _id: "$paymentStatus", count: { $sum: 1 } } }]);
+
+    // AI interprets the command
+    const aiResponse = await callNvidiaAI([
+      { role: "system", content: `You are a batch action interpreter for an event payment system. The organizer gives a natural language command. You translate it to a structured action.
+
+Available actions:
+- approve_all: approve entry for registrations matching a filter
+- hold_all: hold entry for registrations matching a filter
+- send_reminder: send payment reminder to pending registrations
+- flag_all: flag registrations matching criteria
+
+Available filters:
+- paymentStatus: awaiting_payment, payment_verified, amount_mismatch, duplicate_claim, suspicious, manual_review
+- entryStatus: not_ready, entry_approved, entry_held, checked_in
+- ticketType: category name
+- college: college name
+- amountComparison: { operator: "lt"|"gt"|"eq", value: number }
+
+RESPOND ONLY IN JSON:
+{
+  "action": "approve_all|hold_all|send_reminder|flag_all",
+  "filter": { "paymentStatus": "...", "college": "...", ... },
+  "description": "what this will do in plain English",
+  "affectedCount": estimated number based on context,
+  "confirmation": "human-readable confirmation message",
+  "safe": true/false,
+  "safetyNote": "why this might be risky if safe=false"
+}
+
+If the command is unclear or dangerous, set safe=false and explain why.
+NEVER execute destructive actions (delete, refund). Only approve, hold, remind, flag.` },
+      { role: "user", content: JSON.stringify({ command, eventName: event.name, totalRegistrations: regCount, statusBreakdown: statuses }) }
+    ], "meta/llama-4-maverick-17b-128e", { max_tokens: 500 });
+
+    let plan = null;
+    try {
+      const jsonMatch = aiResponse.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, aiResponse];
+      plan = JSON.parse(jsonMatch[1].trim());
+    } catch {
+      try {
+        const start = aiResponse.indexOf("{");
+        const end = aiResponse.lastIndexOf("}");
+        if (start !== -1) plan = JSON.parse(aiResponse.substring(start, end + 1));
+      } catch {}
+    }
+
+    if (!plan) return res.status(502).json({ error: "AI could not interpret the command. Try rephrasing." });
+
+    // Don't execute yet — return the plan for confirmation
+    // Count actual affected registrations
+    const query = { eventId: req.params.eventId };
+    if (plan.filter?.paymentStatus) query.paymentStatus = plan.filter.paymentStatus;
+    if (plan.filter?.entryStatus) query.entryStatus = plan.filter.entryStatus;
+    if (plan.filter?.ticketType) query.ticketType = plan.filter.ticketType;
+    if (plan.filter?.college) query.college = { $regex: plan.filter.college, $options: "i" };
+    const actualCount = await Registration.countDocuments(query);
+    plan.affectedCount = actualCount;
+
+    res.json({ plan, command, requiresConfirmation: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Execute confirmed batch action
+app.post("/api/events/:eventId/ai/batch-action/execute", auth, async (req, res) => {
+  try {
+    const { plan } = req.body;
+    if (!plan || !plan.action || !plan.filter) return res.status(400).json({ error: "Invalid plan" });
+    if (String((await Event.findById(req.params.eventId))?.organizerId) !== String(req.userId)) return res.status(403).json({ error: "Only owner can execute" });
+
+    const query = { eventId: req.params.eventId };
+    if (plan.filter.paymentStatus) query.paymentStatus = plan.filter.paymentStatus;
+    if (plan.filter.entryStatus) query.entryStatus = plan.filter.entryStatus;
+    if (plan.filter.ticketType) query.ticketType = plan.filter.ticketType;
+    if (plan.filter.college) query.college = { $regex: plan.filter.college, $options: "i" };
+
+    let result = { affected: 0 };
+    if (plan.action === "approve_all") {
+      const r = await Registration.updateMany(query, { entryStatus: "entry_approved", paymentStatus: "payment_verified" });
+      result.affected = r.modifiedCount;
+    } else if (plan.action === "hold_all") {
+      const r = await Registration.updateMany(query, { entryStatus: "entry_held" });
+      result.affected = r.modifiedCount;
+    } else if (plan.action === "flag_all") {
+      const r = await Registration.updateMany(query, { $set: { paymentStatus: "suspicious" }, $push: { riskReasons: "Flagged by batch action" } });
+      result.affected = r.modifiedCount;
+    } else if (plan.action === "send_reminder") {
+      const regs = await Registration.find(query).select("registrationId name");
+      for (const r of regs) {
+        await MessageLog.create({ eventId: req.params.eventId, registrationId: r.registrationId, messageType: "payment_pending", content: `Reminder: Your payment is still pending. Please complete it soon.`, channel: "in_app", status: "sent", sentAt: new Date() });
+      }
+      result.affected = regs.length;
+    }
+
+    await AuditLog.create({ eventId: req.params.eventId, actorId: req.userId, actorRole: "organizer", action: `batch.${plan.action}`, target: `${result.affected} registrations`, reason: plan.description });
+    broadcastSSE(req.params.eventId, "batch_action", { action: plan.action, affected: result.affected });
+
+    res.json({ success: true, ...result, action: plan.action });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ============ DEMO MODE ============
 app.post("/api/events/:eventId/demo-seed", auth, async (req, res) => {
   try {

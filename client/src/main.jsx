@@ -966,7 +966,98 @@ function AIInvestigate({ event, notify }) {
           </div>
         </div> : <div className="ai-answer"><pre>{result.answer}</pre></div>}
       </div>}
+
+      <ScreenshotVerify event={event} notify={notify} />
+      <BatchActions event={event} notify={notify} reload={() => {}} />
     </div>
+  </div>;
+}
+
+// ============ SCREENSHOT VERIFICATION ============
+function ScreenshotVerify({ event, notify }) {
+  const [regId, setRegId] = useState("");
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const fileRef = React.useRef(null);
+
+  const verify = async () => {
+    const file = fileRef.current?.files?.[0];
+    if (!file) { notify("Select a screenshot first"); return; }
+    setBusy(true); setResult(null);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result.split(",")[1];
+      try {
+        const r = await api(`/api/events/${event._id}/verify-screenshot`, { method: "POST", body: JSON.stringify({ imageBase64: base64, registrationId: regId || undefined }) });
+        setResult(r);
+      } catch (e) { notify(e.message); }
+      setBusy(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  return <div className="screenshot-section">
+    <h3>Screenshot Verification (AI Vision)</h3>
+    <p className="section-hint">Upload a payment screenshot. AI will extract UTR, amount, and check if it's real or fake.</p>
+    <div className="ss-form">
+      <input type="text" value={regId} onChange={e => setRegId(e.target.value)} placeholder="Registration ID (optional)" />
+      <input type="file" ref={fileRef} accept="image/*" />
+      <button className="btn-primary btn-sm" onClick={verify} disabled={busy}>{busy ? "Analyzing..." : "Verify Screenshot"}</button>
+    </div>
+    {result && <div className={`ss-result ss-${result.verification?.status}`}>
+      <div className="ss-verdict"><strong>{result.verification?.status?.replace(/_/g, " ").toUpperCase()}</strong></div>
+      {result.analysis && <div className="ss-details">
+        <p>UTR: <code>{result.analysis.utr || "Not detected"}</code></p>
+        <p>Amount: {result.analysis.amount ? `₹${result.analysis.amount}` : "Not detected"}</p>
+        <p>Method: {result.analysis.method || "Unknown"}</p>
+        <p>AI Confidence: <span className={`badge badge-${result.analysis.confidence === "high" ? "green" : result.analysis.confidence === "medium" ? "yellow" : "red"}`}>{result.analysis.confidence}</span></p>
+      </div>}
+      {result.verification?.issues?.length > 0 && <div className="ss-issues">{result.verification.issues.map((issue, i) => <p key={i} className="reason"><span className="reason-mark">!</span> {issue}</p>)}</div>}
+    </div>}
+  </div>;
+}
+
+// ============ BATCH ACTIONS ============
+function BatchActions({ event, notify, reload }) {
+  const [command, setCommand] = useState("");
+  const [plan, setPlan] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const interpret = async (e) => {
+    e?.preventDefault(); if (!command.trim()) return;
+    setBusy(true); setPlan(null);
+    try {
+      const r = await api(`/api/events/${event._id}/ai/batch-action`, { method: "POST", body: JSON.stringify({ command }) });
+      setPlan(r.plan);
+    } catch (e) { notify(e.message); }
+    setBusy(false);
+  };
+
+  const execute = async () => {
+    try {
+      const r = await api(`/api/events/${event._id}/ai/batch-action/execute`, { method: "POST", body: JSON.stringify({ plan }) });
+      notify(`Done! ${r.affected} registrations updated.`);
+      setPlan(null); setCommand(""); reload();
+    } catch (e) { notify(e.message); }
+  };
+
+  return <div className="batch-section">
+    <h3>Smart Batch Actions</h3>
+    <p className="section-hint">Type a command in plain English. AI will interpret it and show you what will happen before executing.</p>
+    <form onSubmit={interpret} className="batch-form">
+      <input value={command} onChange={e => setCommand(e.target.value)} placeholder='e.g. "Approve all verified payments" or "Hold everyone who paid less than expected"' />
+      <button className="btn-primary btn-sm" disabled={busy}>{busy ? "..." : "Interpret"}</button>
+    </form>
+    {plan && <div className="batch-plan">
+      <div className="bp-header"><strong>{plan.action?.replace(/_/g, " ").toUpperCase()}</strong><span className={`badge badge-${plan.safe ? "green" : "red"}`}>{plan.safe ? "Safe" : "Risky"}</span></div>
+      <p>{plan.description}</p>
+      <p className="bp-count">Will affect <strong>{plan.affectedCount}</strong> registration(s)</p>
+      {!plan.safe && <p className="reason"><span className="reason-mark">!</span> {plan.safetyNote}</p>}
+      <div className="bp-actions">
+        <button className="btn-primary btn-sm" onClick={execute}>Execute</button>
+        <button className="btn-ghost btn-sm" onClick={() => setPlan(null)}>Cancel</button>
+      </div>
+    </div>}
   </div>;
 }
 
