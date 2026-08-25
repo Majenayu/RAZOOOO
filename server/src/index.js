@@ -1342,7 +1342,7 @@ Check for signs of fake screenshots:
         { type: "text", text: `Analyze this payment screenshot. ${reg ? `Expected payment: ₹${reg.expectedAmount} for registration ${reg.registrationId}.` : "Extract all payment details."}` },
         { type: "image_url", image_url: { url: `data:image/png;base64,${imageBase64}` } }
       ] }
-    ], "meta/llama-4-maverick-17b-128e", { max_tokens: 1000 });
+    ], "meta/llama-3.2-90b-vision-instruct", { max_tokens: 1000 });
 
     // Parse AI response
     let analysis = null;
