@@ -690,6 +690,30 @@ function CommandCenter({ metrics, regs, risks, event, notify, reload }) {
       </div>
       <div className="card"><div className="card-heading"><div><span className="eyebrow">ACTION REQUIRED</span><h3>Recent risk alerts</h3></div><span className="card-status status-risk">{risks.length} open</span></div>{risks.length ? risks.slice(0, 5).map(r => <div key={r._id} className="risk-item"><span className={`badge badge-${r.severity}`}>{r.severity}</span><strong>{r.registrationId}</strong><small>{r.type.replace(/_/g, " ")}</small></div>) : <p className="empty">No risk alerts. Your queue is clear.</p>}</div>
     </div>
+    <EventRiskScore event={event} />
+  </div>;
+}
+
+// ============ EVENT RISK SCORE (AI) ============
+function EventRiskScore({ event }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchRisk = async () => {
+    setLoading(true);
+    try { const d = await api(`/api/events/${event._id}/ai/event-risk`); setData(d); } catch {}
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchRisk(); }, [event._id]);
+
+  if (!data && !loading) return null;
+  if (loading) return <div className="card ai-risk-card"><p>Analyzing event risk...</p></div>;
+
+  return <div className={`card ai-risk-card risk-band-${data.riskBand}`}>
+    <div className="card-heading"><div><span className="eyebrow">AI EVENT HEALTH</span><h3>Risk Score: {data.riskScore}/100 <span className={`badge badge-${data.riskBand === "critical" ? "red" : data.riskBand === "high" ? "orange" : data.riskBand === "medium" ? "yellow" : "green"}`}>{data.riskBand}</span></h3></div><button className="btn-ghost btn-sm" onClick={fetchRisk}>↻</button></div>
+    {data.signals.length > 0 && <div className="risk-signals">{data.signals.map((s, i) => <div key={i} className="rs-item"><span className="rs-score">+{s.score}</span><strong>{s.signal}</strong><small>{s.detail}</small></div>)}</div>}
+    {data.aiCommentary && <div className="ai-commentary"><p>{data.aiCommentary}</p></div>}
   </div>;
 }
 
@@ -969,6 +993,9 @@ function AIInvestigate({ event, notify }) {
 
       <ScreenshotVerify event={event} notify={notify} />
       <BatchActions event={event} notify={notify} reload={() => {}} />
+      <AIFinancialReport event={event} />
+      <AIChurnPrediction event={event} notify={notify} />
+      <AIFraudPatterns event={event} />
     </div>
   </div>;
 }
@@ -1057,6 +1084,85 @@ function BatchActions({ event, notify, reload }) {
         <button className="btn-primary btn-sm" onClick={execute}>Execute</button>
         <button className="btn-ghost btn-sm" onClick={() => setPlan(null)}>Cancel</button>
       </div>
+    </div>}
+  </div>;
+}
+
+// ============ AI FINANCIAL REPORT ============
+function AIFinancialReport({ event }) {
+  const [report, setReport] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const generate = async () => {
+    setLoading(true);
+    try { const d = await api(`/api/events/${event._id}/ai/financial-report`); setReport(d); } catch {}
+    setLoading(false);
+  };
+
+  return <div className="ai-feature-section">
+    <h3>Post-Event Financial Report</h3>
+    <p className="section-hint">AI generates a plain-English explanation of your collection numbers — why there's a gap, where money is stuck.</p>
+    <button className="btn-primary btn-sm" onClick={generate} disabled={loading}>{loading ? "Generating..." : "Generate Report"}</button>
+    {report?.report && <div className="ai-report-output"><pre>{report.report}</pre></div>}
+    {report?.data && !report.report && <p className="section-hint">AI unavailable. Data: ₹{report.data.totalCaptured} collected of ₹{report.data.totalExpected} expected ({report.data.collectionRate}%)</p>}
+  </div>;
+}
+
+// ============ AI CHURN PREDICTION ============
+function AIChurnPrediction({ event, notify }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const predict = async () => {
+    setLoading(true);
+    try { const d = await api(`/api/events/${event._id}/ai/churn-prediction`); setData(d); } catch (e) { notify(e.message); }
+    setLoading(false);
+  };
+
+  return <div className="ai-feature-section">
+    <h3>Who Won't Pay? (Churn Prediction)</h3>
+    <p className="section-hint">AI ranks pending registrations by likelihood of dropping off — so you know who to follow up with first.</p>
+    <button className="btn-primary btn-sm" onClick={predict} disabled={loading}>{loading ? "Predicting..." : "Run Prediction"}</button>
+    {data && <div className="churn-results">
+      <div className="churn-summary">
+        <span className="badge badge-red">{data.summary?.highRisk || 0} high risk</span>
+        <span className="badge badge-yellow">{data.summary?.mediumRisk || 0} medium</span>
+        <span className="badge badge-green">{data.summary?.lowRisk || 0} low</span>
+      </div>
+      {data.aiSummary && <div className="ai-commentary"><p>{data.aiSummary}</p></div>}
+      {data.predictions?.slice(0, 8).map((p, i) => <div key={i} className={`churn-item churn-${p.churnRisk}`}>
+        <strong>{p.name}</strong> <code>{p.registrationId}</code>
+        <span className={`badge badge-${p.churnRisk === "high" ? "red" : p.churnRisk === "medium" ? "yellow" : "green"}`}>{p.churnRisk}</span>
+        <small>{p.reasons[0]}</small>
+      </div>)}
+    </div>}
+  </div>;
+}
+
+// ============ AI FRAUD PATTERNS ============
+function AIFraudPatterns({ event }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const analyze = async () => {
+    setLoading(true);
+    try { const d = await api(`/api/events/${event._id}/ai/fraud-patterns`); setData(d); } catch {}
+    setLoading(false);
+  };
+
+  return <div className="ai-feature-section">
+    <h3>Fraud Pattern Learning</h3>
+    <p className="section-hint">AI reviews resolved risk cases and identifies recurring fraud patterns — then suggests auto-rules.</p>
+    <button className="btn-primary btn-sm" onClick={analyze} disabled={loading}>{loading ? "Learning..." : "Detect Patterns"}</button>
+    {data && <div className="patterns-results">
+      {data.overallInsight && <div className="ai-commentary"><p>{data.overallInsight}</p></div>}
+      {data.patterns?.map((p, i) => <div key={i} className="pattern-item">
+        <strong>{p.pattern}</strong>
+        <span className={`badge badge-${p.confidence === "high" ? "green" : "yellow"}`}>{p.confidence}</span>
+        <small>{p.indicators?.join(", ")}</small>
+        {p.suggestedRule && <p className="pattern-rule">Suggested rule: {p.suggestedRule}</p>}
+      </div>)}
+      {data.suggestedAutoRules?.length > 0 && <div className="auto-rules"><h4>Suggested Auto-Rules:</h4><ul>{data.suggestedAutoRules.map((r, i) => <li key={i}>{r}</li>)}</ul></div>}
     </div>}
   </div>;
 }

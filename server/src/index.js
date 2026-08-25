@@ -1635,6 +1635,293 @@ app.post("/api/events/:eventId/ai/batch-action/execute", auth, async (req, res) 
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ============ AI: AUTO-CATEGORIZE UNMATCHED PAYMENTS ============
+app.post("/api/events/:eventId/ai/auto-match", auth, async (req, res) => {
+  try {
+    const eventId = req.params.eventId;
+    // Find unmatched payments
+    const unmatchedPayments = await PaymentEvent.find({ eventId, matched: false, status: "captured" });
+    if (unmatchedPayments.length === 0) return res.json({ matches: [], message: "No unmatched payments found" });
+
+    // Get all registrations awaiting payment
+    const pendingRegs = await Registration.find({ eventId, paymentStatus: "awaiting_payment" }).select("registrationId name phone email expectedAmount ticketType createdAt");
+
+    const matches = [];
+    for (const payment of unmatchedPayments) {
+      // Fuzzy matching signals
+      const candidates = pendingRegs.map(reg => {
+        let score = 0;
+        const reasons = [];
+        // Phone match (last 10 digits)
+        if (payment.contact && reg.phone && payment.contact.slice(-10) === reg.phone.slice(-10)) { score += 40; reasons.push("Phone number matches"); }
+        // Amount match
+        if (payment.amount === reg.expectedAmount) { score += 30; reasons.push("Amount matches exactly"); }
+        else if (Math.abs(payment.amount - reg.expectedAmount) <= 10) { score += 15; reasons.push(`Amount close (₹${payment.amount} vs ₹${reg.expectedAmount})`); }
+        // Email match
+        if (payment.email && reg.email && payment.email.toLowerCase() === reg.email.toLowerCase()) { score += 20; reasons.push("Email matches"); }
+        // Timing (registered before payment)
+        if (reg.createdAt < payment.createdAt) { score += 5; reasons.push("Registered before payment"); }
+        return { registration: reg, score, reasons };
+      }).filter(c => c.score >= 30).sort((a, b) => b.score - a.score);
+
+      if (candidates.length > 0) {
+        matches.push({ payment: { id: payment.razorpayPaymentId, amount: payment.amount, phone: payment.contact, method: payment.method }, bestMatch: candidates[0], alternates: candidates.slice(1, 3) });
+      }
+    }
+
+    // Use AI to validate ambiguous matches
+    if (matches.length > 0 && process.env.NVIDIA_API_KEY) {
+      try {
+        const aiResponse = await callNvidiaAI([
+          { role: "system", content: "You are a payment matching assistant. Given payment-to-registration match candidates with confidence scores, confirm or reject each match. Respond in JSON: { \"validations\": [{ \"paymentId\": \"...\", \"registrationId\": \"...\", \"valid\": true/false, \"reason\": \"...\" }] }" },
+          { role: "user", content: JSON.stringify(matches.slice(0, 10).map(m => ({ paymentId: m.payment.id, paymentAmount: m.payment.amount, paymentPhone: m.payment.phone, bestMatchRegId: m.bestMatch.registration.registrationId, bestMatchName: m.bestMatch.registration.name, bestMatchPhone: m.bestMatch.registration.phone, bestMatchAmount: m.bestMatch.registration.expectedAmount, score: m.bestMatch.score, reasons: m.bestMatch.reasons }))) }
+        ], "meta/llama-4-maverick-17b-128e", { max_tokens: 800 });
+
+        try {
+          const start = aiResponse.indexOf("{"); const end = aiResponse.lastIndexOf("}");
+          if (start !== -1) { const validation = JSON.parse(aiResponse.substring(start, end + 1)); matches.forEach(m => { const v = validation.validations?.find(v => v.paymentId === m.payment.id); if (v) m.aiValidation = v; }); }
+        } catch {}
+      } catch {}
+    }
+
+    res.json({ matches, total: unmatchedPayments.length, matched: matches.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============ AI: EVENT RISK SCORE ============
+app.get("/api/events/:eventId/ai/event-risk", auth, async (req, res) => {
+  try {
+    const eventId = req.params.eventId;
+    const event = await Event.findById(eventId);
+    if (!event) return res.status(404).json({ error: "Event not found" });
+
+    const oid = new mongoose.Types.ObjectId(eventId);
+    const [totalRegs, verified, pending, mismatches, duplicates, suspicious, openRisks, lastPayment, lastReg] = await Promise.all([
+      Registration.countDocuments({ eventId }),
+      Registration.countDocuments({ eventId, paymentStatus: "payment_verified" }),
+      Registration.countDocuments({ eventId, paymentStatus: "awaiting_payment" }),
+      Registration.countDocuments({ eventId, paymentStatus: "amount_mismatch" }),
+      Registration.countDocuments({ eventId, paymentStatus: "duplicate_claim" }),
+      Registration.countDocuments({ eventId, paymentStatus: "suspicious" }),
+      RiskQueue.countDocuments({ eventId, status: "open" }),
+      PaymentEvent.findOne({ eventId }).sort({ createdAt: -1 }),
+      Registration.findOne({ eventId }).sort({ createdAt: -1 })
+    ]);
+
+    // Calculate risk signals
+    const signals = [];
+    let riskScore = 0;
+
+    const pendingPct = totalRegs > 0 ? (pending / totalRegs) * 100 : 0;
+    if (pendingPct > 50) { signals.push({ signal: "High unpaid rate", score: 25, detail: `${Math.round(pendingPct)}% registrations unpaid` }); riskScore += 25; }
+    else if (pendingPct > 30) { signals.push({ signal: "Moderate unpaid rate", score: 15, detail: `${Math.round(pendingPct)}% registrations unpaid` }); riskScore += 15; }
+
+    if (duplicates > 0) { signals.push({ signal: "Duplicate claims exist", score: 20, detail: `${duplicates} duplicate UTR claim(s)` }); riskScore += 20; }
+    if (mismatches > 2) { signals.push({ signal: "Multiple amount mismatches", score: 15, detail: `${mismatches} mismatch(es)` }); riskScore += 15; }
+    if (suspicious > 0) { signals.push({ signal: "Suspicious registrations", score: 15, detail: `${suspicious} flagged as suspicious` }); riskScore += 15; }
+    if (openRisks > 5) { signals.push({ signal: "Many unresolved risks", score: 10, detail: `${openRisks} open risk cases` }); riskScore += 10; }
+
+    // Check data freshness
+    if (lastPayment) {
+      const minsAgo = (Date.now() - new Date(lastPayment.createdAt)) / 60000;
+      if (minsAgo > 360) { signals.push({ signal: "Stale payment data", score: 10, detail: `Last payment ${Math.round(minsAgo / 60)} hours ago` }); riskScore += 10; }
+    }
+
+    // Check Razorpay config
+    if (!event.razorpayKeyId) { signals.push({ signal: "Razorpay not configured", score: 20, detail: "Payment links cannot be generated" }); riskScore += 20; }
+
+    const riskBand = riskScore >= 70 ? "critical" : riskScore >= 45 ? "high" : riskScore >= 20 ? "medium" : "low";
+
+    // AI commentary
+    let aiCommentary = null;
+    if (process.env.NVIDIA_API_KEY && signals.length > 0) {
+      try {
+        aiCommentary = await callNvidiaAI([
+          { role: "system", content: "You are an event risk advisor. Given risk signals for an event, write a 2-3 sentence actionable summary. Be specific about what needs attention and what's fine. Plain language." },
+          { role: "user", content: JSON.stringify({ eventName: event.name, daysUntilEvent: Math.ceil((new Date(event.eventDate) - Date.now()) / 86400000), totalRegs, verified, pending, signals, riskScore }) }
+        ], "meta/llama-4-maverick-17b-128e", { max_tokens: 200 });
+      } catch {}
+    }
+
+    res.json({ riskScore: Math.min(100, riskScore), riskBand, signals, stats: { totalRegs, verified, pending, mismatches, duplicates, suspicious, openRisks }, aiCommentary });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============ AI: CHURN PREDICTION (Who won't pay) ============
+app.get("/api/events/:eventId/ai/churn-prediction", auth, async (req, res) => {
+  try {
+    const eventId = req.params.eventId;
+    const pending = await Registration.find({ eventId, paymentStatus: "awaiting_payment" }).select("registrationId name phone email ticketType expectedAmount createdAt");
+
+    if (pending.length === 0) return res.json({ predictions: [], message: "No pending registrations" });
+
+    // Score each pending registration by churn likelihood
+    const now = Date.now();
+    const predictions = pending.map(reg => {
+      let churnScore = 0;
+      const reasons = [];
+
+      // Time since registration (older = more likely to churn)
+      const hoursSinceReg = (now - new Date(reg.createdAt)) / 3600000;
+      if (hoursSinceReg > 48) { churnScore += 40; reasons.push(`Registered ${Math.round(hoursSinceReg)} hours ago — very stale`); }
+      else if (hoursSinceReg > 12) { churnScore += 20; reasons.push(`Registered ${Math.round(hoursSinceReg)} hours ago`); }
+      else { reasons.push(`Registered ${Math.round(hoursSinceReg)} hours ago — still fresh`); }
+
+      // Higher ticket prices churn more
+      if (reg.expectedAmount > 1000) { churnScore += 15; reasons.push(`High ticket price (₹${reg.expectedAmount})`); }
+
+      // No email = harder to reach
+      if (!reg.email) { churnScore += 10; reasons.push("No email provided — only SMS possible"); }
+
+      return { registrationId: reg.registrationId, name: reg.name, phone: reg.phone, expectedAmount: reg.expectedAmount, hoursSinceReg: Math.round(hoursSinceReg), churnScore, churnRisk: churnScore >= 40 ? "high" : churnScore >= 20 ? "medium" : "low", reasons };
+    }).sort((a, b) => b.churnScore - a.churnScore);
+
+    // AI enhancement: personalized recommendation
+    let aiSummary = null;
+    if (process.env.NVIDIA_API_KEY && predictions.length > 0) {
+      try {
+        aiSummary = await callNvidiaAI([
+          { role: "system", content: "You are a payment recovery advisor for events. Given churn predictions for pending registrations, suggest a prioritized follow-up strategy in 3-4 bullet points. Be specific — mention groups and actions." },
+          { role: "user", content: JSON.stringify({ totalPending: predictions.length, highRisk: predictions.filter(p => p.churnRisk === "high").length, mediumRisk: predictions.filter(p => p.churnRisk === "medium").length, lowRisk: predictions.filter(p => p.churnRisk === "low").length, topChurners: predictions.slice(0, 5) }) }
+        ], "meta/llama-4-maverick-17b-128e", { max_tokens: 300 });
+      } catch {}
+    }
+
+    res.json({ predictions, summary: { total: predictions.length, highRisk: predictions.filter(p => p.churnRisk === "high").length, mediumRisk: predictions.filter(p => p.churnRisk === "medium").length, lowRisk: predictions.filter(p => p.churnRisk === "low").length }, aiSummary });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============ AI: AUTO-GENERATE PERSONALIZED MESSAGES ============
+app.post("/api/events/:eventId/ai/generate-messages", auth, async (req, res) => {
+  try {
+    const { type, registrationIds } = req.body;
+    const eventId = req.params.eventId;
+    const event = await Event.findById(eventId);
+    if (!event) return res.status(404).json({ error: "Event not found" });
+
+    let targetRegs;
+    if (registrationIds?.length) {
+      targetRegs = await Registration.find({ eventId, registrationId: { $in: registrationIds } });
+    } else if (type === "pending") {
+      targetRegs = await Registration.find({ eventId, paymentStatus: "awaiting_payment" }).limit(20);
+    } else if (type === "mismatch") {
+      targetRegs = await Registration.find({ eventId, paymentStatus: "amount_mismatch" }).limit(20);
+    } else {
+      return res.status(400).json({ error: "Specify type ('pending'/'mismatch') or registrationIds" });
+    }
+
+    if (targetRegs.length === 0) return res.json({ messages: [], message: "No matching registrations" });
+
+    if (!process.env.NVIDIA_API_KEY) return res.status(503).json({ error: "AI not configured" });
+
+    const aiResponse = await callNvidiaAI([
+      { role: "system", content: `You are a message writer for event payment reminders. Generate SHORT, friendly, personalized SMS messages (max 160 chars each) for participants.
+
+Event: ${event.name}
+Event Date: ${new Date(event.eventDate).toLocaleDateString("en-IN")}
+
+Rules:
+- Keep under 160 characters
+- Be friendly and urgent but not pushy
+- Include the participant's name
+- Mention the amount if relevant
+- Include "[Pay Now]" as placeholder for payment link
+- Support Hinglish tone for Indian audience
+
+RESPOND IN JSON: { "messages": [{ "registrationId": "...", "message": "..." }] }` },
+      { role: "user", content: JSON.stringify(targetRegs.map(r => ({ registrationId: r.registrationId, name: r.name, expectedAmount: r.expectedAmount, paymentStatus: r.paymentStatus, hoursPending: Math.round((Date.now() - new Date(r.createdAt)) / 3600000) }))) }
+    ], "meta/llama-4-maverick-17b-128e", { max_tokens: 1500 });
+
+    let messages = [];
+    try {
+      const start = aiResponse.indexOf("{"); const end = aiResponse.lastIndexOf("}");
+      if (start !== -1) { const parsed = JSON.parse(aiResponse.substring(start, end + 1)); messages = parsed.messages || []; }
+    } catch {}
+
+    res.json({ messages, count: messages.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============ AI: POST-EVENT FINANCIAL REPORT ============
+app.get("/api/events/:eventId/ai/financial-report", auth, async (req, res) => {
+  try {
+    const eventId = req.params.eventId;
+    const event = await Event.findById(eventId);
+    if (!event) return res.status(404).json({ error: "Event not found" });
+
+    const oid = new mongoose.Types.ObjectId(eventId);
+    const [regs, payments, risks] = await Promise.all([
+      Registration.find({ eventId }),
+      PaymentEvent.find({ eventId }),
+      RiskQueue.find({ eventId })
+    ]);
+
+    const totalExpected = regs.reduce((s, r) => s + r.expectedAmount, 0);
+    const totalCaptured = payments.filter(p => p.status === "captured").reduce((s, p) => s + p.amount, 0);
+    const totalRefunded = payments.filter(p => p.status === "refunded").reduce((s, p) => s + p.amount, 0);
+    const unpaidRegs = regs.filter(r => r.paymentStatus === "awaiting_payment");
+    const mismatchRegs = regs.filter(r => r.paymentStatus === "amount_mismatch");
+    const verifiedRegs = regs.filter(r => r.paymentStatus === "payment_verified");
+
+    const gap = totalExpected - totalCaptured;
+    const gapBreakdown = { unpaidAmount: unpaidRegs.reduce((s, r) => s + r.expectedAmount, 0), mismatchShortfall: mismatchRegs.reduce((s, r) => s + (r.expectedAmount - r.amountReceived), 0), refunded: totalRefunded };
+
+    if (!process.env.NVIDIA_API_KEY) return res.json({ report: null, data: { totalExpected, totalCaptured, gap, gapBreakdown, regsCount: regs.length, verified: verifiedRegs.length, unpaid: unpaidRegs.length, risksResolved: risks.filter(r => r.status === "resolved").length, risksOpen: risks.filter(r => r.status === "open").length } });
+
+    const report = await callNvidiaAI([
+      { role: "system", content: `You are a financial report writer for event payment systems. Write a clear, professional post-event financial summary. Use this structure:
+
+1. **Collection Summary** — total expected, collected, gap percentage
+2. **Gap Explanation** — break down exactly where the gap comes from (unpaid, mismatches, refunds)
+3. **Risk Cases** — how many were detected, how many resolved, outcomes
+4. **Recommendations** — what the organizer should do next (follow up? write off? investigate?)
+
+Keep it under 300 words. Use ₹ for amounts. Be specific with numbers.` },
+      { role: "user", content: JSON.stringify({ eventName: event.name, eventDate: event.eventDate, totalRegistrations: regs.length, verified: verifiedRegs.length, unpaid: unpaidRegs.length, mismatches: mismatchRegs.length, totalExpected, totalCaptured, totalRefunded, gap, gapBreakdown, riskCases: { total: risks.length, resolved: risks.filter(r => r.status === "resolved").length, open: risks.filter(r => r.status === "open").length, dismissed: risks.filter(r => r.status === "dismissed").length }, paymentMethods: payments.reduce((acc, p) => { acc[p.method || "unknown"] = (acc[p.method || "unknown"] || 0) + 1; return acc; }, {}) }) }
+    ], "meta/llama-4-maverick-17b-128e", { max_tokens: 800 });
+
+    res.json({ report, data: { totalExpected, totalCaptured, gap, gapBreakdown, collectionRate: totalRegs > 0 ? Math.round((totalCaptured / totalExpected) * 100) : 0, regsCount: regs.length, verified: verifiedRegs.length, unpaid: unpaidRegs.length } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============ AI: FRAUD PATTERN LEARNING ============
+app.get("/api/events/:eventId/ai/fraud-patterns", auth, async (req, res) => {
+  try {
+    const eventId = req.params.eventId;
+    // Get all resolved risk cases to learn from
+    const resolvedRisks = await RiskQueue.find({ eventId, status: { $in: ["resolved", "dismissed"] } });
+    const flaggedRegs = await Registration.find({ eventId, riskScore: { $gte: 50 } }).select("registrationId name phone email ticketType riskScore riskReasons paymentStatus entryStatus createdAt");
+
+    if (resolvedRisks.length === 0 && flaggedRegs.length === 0) return res.json({ patterns: [], message: "Not enough data to detect patterns. Need resolved risk cases." });
+
+    if (!process.env.NVIDIA_API_KEY) return res.json({ patterns: [{ pattern: "Insufficient AI access", suggestion: "Configure NVIDIA API key for pattern detection" }] });
+
+    const aiResponse = await callNvidiaAI([
+      { role: "system", content: `You are a fraud pattern analyst for event payments. Given resolved risk cases and flagged registrations, identify recurring patterns.
+
+RESPOND IN JSON:
+{
+  "patterns": [
+    { "pattern": "short description", "frequency": "how often seen", "indicators": ["signal 1", "signal 2"], "suggestedRule": "auto-hold if X and Y", "confidence": "high|medium|low" }
+  ],
+  "overallInsight": "one paragraph summary of fraud landscape for this event",
+  "suggestedAutoRules": ["rule 1", "rule 2"]
+}
+
+Be specific — reference actual data patterns (time of day, amounts, phone prefixes, registration gaps). Don't invent patterns that aren't supported by the data.` },
+      { role: "user", content: JSON.stringify({ resolvedRisks: resolvedRisks.map(r => ({ type: r.type, severity: r.severity, resolution: r.resolution, registrationId: r.registrationId })), flaggedRegistrations: flaggedRegs.map(r => ({ registrationId: r.registrationId, riskScore: r.riskScore, riskReasons: r.riskReasons, paymentStatus: r.paymentStatus, ticketType: r.ticketType, createdAt: r.createdAt })), totalResolved: resolvedRisks.length, totalFlagged: flaggedRegs.length }) }
+    ], "meta/llama-4-maverick-17b-128e", { max_tokens: 1000 });
+
+    let result = null;
+    try {
+      const start = aiResponse.indexOf("{"); const end = aiResponse.lastIndexOf("}");
+      if (start !== -1) result = JSON.parse(aiResponse.substring(start, end + 1));
+    } catch {}
+
+    res.json(result || { patterns: [], overallInsight: aiResponse, suggestedAutoRules: [] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ============ DEMO MODE ============
 app.post("/api/events/:eventId/demo-seed", auth, async (req, res) => {
   try {

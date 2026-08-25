@@ -793,3 +793,43 @@ tr.row-risk{background:#fff8f3}
 .bp-header strong{font-size:13px}
 .bp-count{font-size:12px;color:var(--text2);margin:6px 0}
 .bp-actions{display:flex;gap:8px;margin-top:10px}
+
+/* AI Feature Sections */
+.ai-feature-section{margin-top:20px;padding-top:20px;border-top:1px solid var(--border)}
+.ai-feature-section h3{font-size:15px;font-weight:700;margin-bottom:4px}
+.ai-report-output{margin-top:12px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px}
+.ai-report-output pre{white-space:pre-wrap;font-size:12px;line-height:1.7;font-family:inherit}
+.ai-commentary{margin-top:10px;padding:12px;background:var(--accent-light);border:1px solid rgba(99,91,255,.2);border-radius:8px;font-size:12px;line-height:1.6}
+.ai-commentary p{margin:0}
+
+/* Event Risk Score Card */
+.ai-risk-card{margin-top:16px}
+.risk-band-critical{border-left:4px solid var(--red)}
+.risk-band-high{border-left:4px solid var(--orange)}
+.risk-band-medium{border-left:4px solid var(--yellow)}
+.risk-band-low{border-left:4px solid var(--green)}
+.risk-signals{display:flex;flex-direction:column;gap:4px;margin:10px 0}
+.rs-item{display:flex;align-items:center;gap:8px;font-size:12px;padding:5px 0}
+.rs-score{font-weight:800;color:var(--red);min-width:28px}
+.rs-item strong{font-size:12px}
+.rs-item small{color:var(--text2);margin-left:auto}
+
+/* Churn Prediction */
+.churn-results{margin-top:12px}
+.churn-summary{display:flex;gap:8px;margin-bottom:10px}
+.churn-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font-size:12px;margin-bottom:4px;background:var(--gray-light)}
+.churn-high{background:var(--red-light)}
+.churn-medium{background:var(--yellow-light)}
+.churn-item code{font-size:10px;background:#e2e8f0;padding:1px 4px;border-radius:3px}
+.churn-item small{margin-left:auto;color:var(--text2);font-size:10px}
+
+/* Fraud Patterns */
+.patterns-results{margin-top:12px}
+.pattern-item{padding:10px 12px;background:var(--gray-light);border-radius:8px;margin-bottom:6px;font-size:12px}
+.pattern-item strong{display:block;margin-bottom:3px}
+.pattern-item small{color:var(--text2);display:block;margin-top:3px}
+.pattern-rule{font-size:11px;color:var(--accent);font-weight:600;margin-top:4px}
+.auto-rules{margin-top:12px;padding:12px;background:#fff;border:1px solid var(--border);border-radius:8px}
+.auto-rules h4{font-size:12px;margin-bottom:6px}
+.auto-rules ul{padding-left:16px;font-size:11px;color:var(--text2)}
+.auto-rules li{margin-bottom:4px}
