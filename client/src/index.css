@@ -462,6 +462,8 @@ tr:hover{background:#f4fafb!important}
 }
 
 /* Events workspace: calm, easy-to-scan home */
+.app-shell:not(.dashboard-shell){display:block}
+.app-shell:not(.dashboard-shell)>.app-header{width:100%}
 .events-page{padding-top:42px!important}
 .events-intro{padding:0 0 30px!important;border-bottom:0!important;margin-bottom:20px!important}
 .events-intro h1{font-size:34px!important;letter-spacing:-1.2px!important}
