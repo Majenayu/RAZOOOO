@@ -395,9 +395,14 @@ body{background:var(--bg);color:var(--text)}
 .hero p{max-width:640px;margin:0 auto 30px;font-size:17px}
 .features{padding:36px 0 88px}
 .features h2{font-size:30px;letter-spacing:-.8px}
+.section-intro{text-align:center;max-width:620px;margin:0 auto 30px}
+.section-intro h2{margin-bottom:8px}
+.section-intro p{color:var(--text2);font-size:14px;line-height:1.6}
 .f-grid{gap:16px}
 .f-card{padding:24px;border-radius:16px;box-shadow:var(--shadow)}
 .f-card:hover{border-color:#a8d7df;box-shadow:0 14px 34px rgba(23,107,135,.12)}
+.feature-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:17px}
+.feature-step{font-size:11px;font-weight:800;letter-spacing:.12em;color:#9aaab1;padding-top:4px}
 .f-card .feature-icon{background:#e6f4f7;color:#176b87;border-radius:13px}
 .differentiator{padding-bottom:76px}
 .diff-box{border-radius:20px!important;background:#15202b!important;box-shadow:0 18px 44px rgba(21,32,43,.16)}
