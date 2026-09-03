@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-labelledby="title desc">
+  <title id="title">EventPay Sentinel mark</title>
+  <desc id="desc">A teal shield with a verified payment spark</desc>
+  <defs>
+    <linearGradient id="shield" x1="18" y1="12" x2="78" y2="86" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#39b6bf"/>
+      <stop offset="1" stop-color="#12627d"/>
+    </linearGradient>
+    <linearGradient id="spark" x1="31" y1="29" x2="66" y2="67" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff"/>
+      <stop offset="1" stop-color="#baf5ed"/>
+    </linearGradient>
+  </defs>
+  <rect width="96" height="96" rx="26" fill="#132530"/>
+  <path d="M48 13 76 23v22c0 18-11.2 31.7-28 39-16.8-7.3-28-21-28-39V23l28-10Z" fill="url(#shield)"/>
+  <path d="m37 48 7.5 7.5L61 38" fill="none" stroke="url(#spark)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m48 27 3.4 9.6L61 40l-9.6 3.4L48 53l-3.4-9.6L35 40l9.6-3.4L48 27Z" fill="none" stroke="#fff" stroke-opacity=".35" stroke-width="2"/>
+</svg>

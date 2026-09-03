@@ -16,6 +16,23 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || "eventpay-sentinel-secret";
+const KEEP_ALIVE_URL = process.env.KEEP_ALIVE_URL || process.env.RENDER_EXTERNAL_URL || "";
+const KEEP_ALIVE_INTERVAL = 14 * 60 * 1000 + 59 * 1000;
+
+// Render keep-alive: opt-in through the public service URL, no UI surface required.
+function startKeepAlive() {
+  if (!KEEP_ALIVE_URL || process.env.NODE_ENV !== "production") return;
+  const ping = async () => {
+    try {
+      const healthUrl = new URL("/api/health", KEEP_ALIVE_URL).toString();
+      await fetch(healthUrl, { headers: { "x-eventpay-keepalive": "1" } });
+    } catch (e) {
+      console.warn("Keep-alive ping failed:", e.message);
+    }
+  };
+  const timer = setInterval(ping, KEEP_ALIVE_INTERVAL);
+  timer.unref();
+}
 
 // ============ HELPERS ============
 function razorpayErrorMessage(e) {
@@ -2283,6 +2300,7 @@ async function matchPaymentToRegistration(paymentEvent) {
 }
 
 // ============ START ============
+startKeepAlive();
 if (!process.env.MONGODB_URI) {
   console.warn("MONGODB_URI not configured");
   app.listen(PORT, "0.0.0.0", () => console.log(`EventPay Sentinel API on port ${PORT}`));
