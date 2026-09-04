@@ -945,3 +945,19 @@ tr.row-risk{background:#fff8f3}
 .auto-rules h4{font-size:12px;margin-bottom:6px}
 .auto-rules ul{padding-left:16px;font-size:11px;color:var(--text2)}
 .auto-rules li{margin-bottom:4px}
+
+/* Final landing overrides keep the redesigned hero ahead of legacy shell styles. */
+.landing .l-header{max-width:1180px;margin:0 auto;padding:24px 0!important}
+.landing .hero.hero-new{display:grid;grid-template-columns:minmax(0,1fr) minmax(460px,1.05fr);max-width:1180px;margin:0 auto;padding:86px 0 105px;text-align:left}
+.landing .hero.hero-new::before,.landing .hero.hero-new:before{content:none!important;display:none!important}
+.landing .hero.hero-new h1{background:none;-webkit-text-fill-color:initial;color:#15202b;text-align:left}
+.landing .hero.hero-new p{margin-left:0;margin-right:0;text-align:left}
+@media(max-width:900px){
+  .landing .hero.hero-new{grid-template-columns:1fr;text-align:center}
+  .landing .hero.hero-new h1,.landing .hero.hero-new p{text-align:center}
+  .landing .hero.hero-new p{margin-left:auto;margin-right:auto}
+}
+@media(max-width:600px){
+  .landing .hero.hero-new{padding:62px 0 70px}
+  .landing .hero.hero-new h1{font-size:40px}
+}
