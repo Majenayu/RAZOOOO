@@ -41,7 +41,7 @@ const useAuth = () => useContext(AuthCtx);
 // ============ GOOGLE CLIENT ID ============
 const GOOGLE_CLIENT_ID = "538833309030-4gjr4t71dv9h8aififqjdl7umg6spc3g.apps.googleusercontent.com";
 // Add the 11-character YouTube video ID here when the walkthrough is published.
-const DEMO_VIDEO_ID = "https://youtu.be/W70P1NWe1E0";
+const DEMO_VIDEO_ID = "W70P1NWe1E0";
 
 // ============ APP ============
 function App() {
