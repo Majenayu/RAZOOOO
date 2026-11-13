@@ -194,3 +194,20 @@ cd ../client && npm install
 ## License
 
 Private — built for VIBEATHON 2026
+
+## Repository map
+
+```text
+client/                 # Vite + React browser application
+server/src/index.js     # Express entry point and API wiring
+server/src/             # models, middleware, integrations, and routes
+client/src/              # pages and reusable UI components
+render.yaml              # Render service configuration
+.env.example             # local configuration template
+```
+
+The root `package.json` starts the client and server together with
+`concurrently`. The server and client also have their own manifests and lock
+files. Inspect the server route files and models before extending the API; this
+README intentionally describes the public workflow without inventing fields
+that are not present in the implementation.
